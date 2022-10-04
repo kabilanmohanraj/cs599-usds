@@ -4,12 +4,16 @@ from __future__ import division
 from __future__ import print_function
 
 import csv
+from email import header
 import logging
 from enum import Enum
+from turtle import right
 from typing import List, Tuple
 import uuid
 
-import ray
+from yaml import scan
+
+# import ray
 
 # Note (john): Make sure you use Python's logger to log
 #              information about your program
@@ -134,19 +138,40 @@ class Scan(Operator):
                  track_prov=False,
                  propagate_prov=False,
                  pull=True,
-                 partition_strategy : PartitionStrategy = PartitionStrategy.RR):
+                 partition_strategy : PartitionStrategy = PartitionStrategy.RR,
+                 batch_size=100):
         super(Scan, self).__init__(name="Scan",
                                    track_prov=track_prov,
                                    propagate_prov=propagate_prov,
                                    pull=pull,
                                    partition_strategy=partition_strategy)
         # YOUR CODE HERE
-        pass
+        self.filepath = filepath
+        self.batch_size = batch_size
+        self.scan_pointer = 1
+        self.first_execution = True
+
+        # if(self.pull):
+        #     self.get_next()
+        # else:
+        #     self.start()
 
     # Returns next batch of tuples in given file (or None if file exhausted)
     def get_next(self):
         # YOUR CODE HERE
-        pass
+        if(self.first_execution):
+            with open(self.filepath) as input_file:
+                input_reader = csv.reader(input_file, delimiter=" ")
+                column_headers = input_reader.__next__()
+            self.first_execution = False
+
+        output_data = []
+
+        with open(self.filepath) as input_file:
+            output_data = [ATuple(tuple = tuple(map(int, row.split(" ")))) for idx, row in enumerate(input_file) if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size)]
+
+        self.scan_pointer += self.batch_size
+        return output_data, self.batch_size
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -162,6 +187,7 @@ class Scan(Operator):
     # Starts the process of reading tuples (only for push-based evaluation)
     def start(self):
         pass
+            
 
 # Equi-join operator
 class Join(Operator):
@@ -202,12 +228,37 @@ class Join(Operator):
                                    pull=pull,
                                    partition_strategy=partition_strategy)
         # YOUR CODE HERE
-        pass
+        self.left_inputs = left_inputs
+        self.right_inputs = right_inputs
+        self.left_join_attribute = left_join_attribute
+        self.right_join_attribute = right_join_attribute
+
+        self.get_next()
 
     # Returns next batch of joined tuples (or None if done)
     def get_next(self):
         # YOUR CODE HERE
-        pass
+        logger.info("In Join operator pull based.")
+        print()
+
+        left_relation_hash = {}
+
+        for operator in self.left_inputs:
+            while(True):
+                output_data, batch_size = operator.get_next()
+                # Collect the left relation into a dictionary (hashing)
+                for atup_left in output_data:
+                    # print(atup_left.tuple)
+                    left_relation_hash[str(atup_left.tuple[1])] = atup_left.tuple[0]
+                if(len(output_data) < batch_size):
+                    break
+        logger.debug(left_relation_hash["176"])
+        # for operator in self.right_inputs:
+        #     output_data = operator.get_next()
+        #     for atup_right in output_data:
+        #         print(atup_right.tuple)
+    
+        return [] # list of list of tuples
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -223,6 +274,9 @@ class Join(Operator):
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
         pass
+
+
+
 
 # Project operator
 class Project(Operator):
@@ -309,7 +363,7 @@ class GroupBy(Operator):
                  outputs : List[Operator],
                  key,
                  value,
-                 agg_gun,
+                 agg_fun,
                  track_prov=False,
                  propagate_prov=False,
                  pull=True,
@@ -536,12 +590,17 @@ class Select(Operator):
                                      propagate_prov=propagate_prov,
                                      pull=pull,
                                      partition_strategy=partition_strategy)
-        # YOUR CODE HERE
-        pass
+        self.inputs = inputs
+        self.outputs = outputs
+        self.predicate = predicate
+        self.batch_size = 0
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
         # YOUR CODE HERE
+        for operator in self.inputs:
+            output_data, batch_size = operator.get_next()
+            return self.predicate(output_data, batch_size)
         pass
 
     # Applies the operator logic to the given list of tuples
@@ -562,6 +621,32 @@ if __name__ == "__main__":
     #       AND R.MID = 'M'
 
     # YOUR CODE HERE
+
+    batch_size = int(input("Please enter preferred batch size for reading input relations: "))
+
+    ## Pull-based
+
+    relation_1 = "./data/friends.txt"
+    relation_2 = "./data/movie_ratings.txt"
+    scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size)
+    scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size)
+
+    def relation_filter_left(scan_output_left, batch_size):
+        return scan_output_left, batch_size
+
+    def relation_filter_right(scan_output_right, batch_size):
+        return scan_output_right, batch_size
+
+    filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
+    filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
+
+    join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=2, right_join_attribute=1)
+
+    # average_operator = AverageOp()
+
+
+
+    
 
 
     # TASK 2: Implement recommendation query for User A
