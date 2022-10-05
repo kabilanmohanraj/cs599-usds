@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
+import collections
 
 import csv
 from email import header
@@ -10,6 +11,7 @@ from enum import Enum
 from turtle import right
 from typing import List, Tuple
 import uuid
+from numpy import average
 
 from yaml import scan
 
@@ -159,6 +161,7 @@ class Scan(Operator):
     # Returns next batch of tuples in given file (or None if file exhausted)
     def get_next(self):
         # YOUR CODE HERE
+        logger.debug("In scan opertor =====")
         if(self.first_execution):
             with open(self.filepath) as input_file:
                 input_reader = csv.reader(input_file, delimiter=" ")
@@ -233,32 +236,42 @@ class Join(Operator):
         self.left_join_attribute = left_join_attribute
         self.right_join_attribute = right_join_attribute
 
-        self.get_next()
-
     # Returns next batch of joined tuples (or None if done)
     def get_next(self):
         # YOUR CODE HERE
         logger.info("In Join operator pull based.")
         print()
 
-        left_relation_hash = {}
+        left_relation_hash = collections.defaultdict(list)
 
         for operator in self.left_inputs:
             while(True):
-                output_data, batch_size = operator.get_next()
+                left_input, batch_size = operator.get_next()
                 # Collect the left relation into a dictionary (hashing)
-                for atup_left in output_data:
-                    # print(atup_left.tuple)
-                    left_relation_hash[str(atup_left.tuple[1])] = atup_left.tuple[0]
-                if(len(output_data) < batch_size):
+                for atup_left in left_input:
+                    logger.debug(atup_left)
+                    left_relation_hash[str(atup_left.tuple[1])].append(atup_left.tuple)
+                if(len(left_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
                     break
-        logger.debug(left_relation_hash["176"])
-        # for operator in self.right_inputs:
-        #     output_data = operator.get_next()
-        #     for atup_right in output_data:
-        #         print(atup_right.tuple)
-    
-        return [] # list of list of tuples
+        
+        logger.debug(left_relation_hash.keys()) # returns empty list if key not found
+        logger.info("Completed hashing. Starting probing")
+        output_from_probing = []
+
+        for operator in self.right_inputs:
+            while(True):
+                right_input, batch_size = operator.get_next()
+                # Collect the right relation in batches and compare with the previously created dictionary (probing)
+                for atup_right in right_input:
+                    print(str(atup_right.tuple[0]))
+                    if(left_relation_hash[str(atup_right.tuple[0])] != []):
+                        output_from_probing.append(atup_right.tuple[2])
+                if(len(right_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
+                    break
+        
+        logger.debug(output_from_probing)
+        logger.info("Sending data to average operator>>>>>>>>>>")
+        return output_from_probing # list of list of tuples
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -374,12 +387,19 @@ class GroupBy(Operator):
                                       pull=pull,
                                       partition_strategy=partition_strategy)
         # YOUR CODE HERE
-        pass
+        self.inputs = inputs
+        self.outputs = outputs
+        self.agg_fun = agg_fun
+        self.inputs = inputs
+        self.key = key
+        self.value = value
 
     # Returns aggregated value per distinct key in the input (or None if done)
     def get_next(self):
-        # YOUR CODE HERE
-        pass
+        logger.debug("In group by operator===")
+        for operator in self.inputs:
+            output_from_probing = operator.get_next()
+            logger.debug(average(output_from_probing))
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -597,11 +617,11 @@ class Select(Operator):
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
-        # YOUR CODE HERE
+        logger.debug("In select operator===")
         for operator in self.inputs:
             output_data, batch_size = operator.get_next()
-            return self.predicate(output_data, batch_size)
-        pass
+        filtered_output_data = self.predicate(output_data)
+        return filtered_output_data, batch_size
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
@@ -631,18 +651,33 @@ if __name__ == "__main__":
     scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size)
     scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size)
 
-    def relation_filter_left(scan_output_left, batch_size):
-        return scan_output_left, batch_size
 
-    def relation_filter_right(scan_output_right, batch_size):
-        return scan_output_right, batch_size
+
+    def relation_filter_left(scan_output_left):
+        if(scan_operator_left is not None):
+            filter_output_left = [row for row in scan_output_left if(row.tuple[0] == 10)]
+        return filter_output_left
+
+    # pr1int("Filter debug=======================", relation_filter_left(scan_operator_left.get_next()[0]))
+
+    def relation_filter_right(scan_output_right):
+        if(scan_operator_right is not None):
+            filter_output_right = [row for row in scan_output_right if(row.tuple[1] == 3)]
+        return filter_output_right
 
     filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
     filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
 
+
+
+
     join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=2, right_join_attribute=1)
 
-    # average_operator = AverageOp()
+    def avg(input_tuples):
+        return average(input_tuples)
+
+    average_operator = GroupBy(inputs=[join_operator], outputs=[], agg_fun=avg, key=4 , value=5)
+    average_operator.get_next()
 
 
 
