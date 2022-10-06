@@ -649,7 +649,7 @@ if __name__ == "__main__":
             filter_output_left = [row for row in scan_output_left if(row.tuple[0] == 10)]
         return filter_output_left
 
-    # pr1int("Filter debug=======================", relation_filter_left(scan_operator_left.get_next()[0]))
+    # pr1int("Filter debug=======================", relation_filter_left(scan_operator_left.get_next()[0])) # Testing the select(filter) operator
 
     def relation_filter_right(scan_output_right):
         if(scan_operator_right is not None):
