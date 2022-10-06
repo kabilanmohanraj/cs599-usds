@@ -153,11 +153,6 @@ class Scan(Operator):
         self.scan_pointer = 1
         self.first_execution = True
 
-        # if(self.pull):
-        #     self.get_next()
-        # else:
-        #     self.start()
-
     # Returns next batch of tuples in given file (or None if file exhausted)
     def get_next(self):
         # YOUR CODE HERE
@@ -239,7 +234,7 @@ class Join(Operator):
     # Returns next batch of joined tuples (or None if done)
     def get_next(self):
         # YOUR CODE HERE
-        logger.info("In Join operator pull based.")
+        logger.info("In Join operator pull-based======")
         print()
 
         left_relation_hash = collections.defaultdict(list)
@@ -249,13 +244,12 @@ class Join(Operator):
                 left_input, batch_size = operator.get_next()
                 # Collect the left relation into a dictionary (hashing)
                 for atup_left in left_input:
-                    logger.debug(atup_left)
                     left_relation_hash[str(atup_left.tuple[1])].append(atup_left.tuple)
                 if(len(left_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
                     break
         
-        logger.debug(left_relation_hash.keys()) # returns empty list if key not found
-        logger.info("Completed hashing. Starting probing")
+        # logger.debug(left_relation_hash["1190"]) # returns empty list if key not found
+        logger.info("Completed hashing phase. Starting probing phase====")
         output_from_probing = []
 
         for operator in self.right_inputs:
@@ -263,14 +257,11 @@ class Join(Operator):
                 right_input, batch_size = operator.get_next()
                 # Collect the right relation in batches and compare with the previously created dictionary (probing)
                 for atup_right in right_input:
-                    print(str(atup_right.tuple[0]))
                     if(left_relation_hash[str(atup_right.tuple[0])] != []):
                         output_from_probing.append(atup_right.tuple[2])
                 if(len(right_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
                     break
-        
-        logger.debug(output_from_probing)
-        logger.info("Sending data to average operator>>>>>>>>>>")
+
         return output_from_probing # list of list of tuples
 
     # Returns the lineage of the given tuples
