@@ -57,7 +57,7 @@ class ATuple:
         pass
 
     # Returns the How-provenance of self
-    def how(self) -> string:
+    def how(self) -> str:
         # YOUR CODE HERE (ONLY FOR TASK 3 IN ASSIGNMENT 2)
         pass
 
@@ -132,6 +132,9 @@ class Scan(Operator):
         partition_strategy (Enum): Defines the output partitioning
         strategy.
     """
+    scan_operator_number = 0 # The variable is used in the indexing scheme for the attributes
+    column_headers_to_index = {} # Mapping attributes to numbers
+
     # Initializes scan operator
     def __init__(self,
                  filepath,
@@ -141,7 +144,8 @@ class Scan(Operator):
                  propagate_prov=False,
                  pull=True,
                  partition_strategy : PartitionStrategy = PartitionStrategy.RR,
-                 batch_size=100):
+                 batch_size=100,
+                 relation_tag="L"):
         super(Scan, self).__init__(name="Scan",
                                    track_prov=track_prov,
                                    propagate_prov=propagate_prov,
@@ -149,27 +153,35 @@ class Scan(Operator):
                                    partition_strategy=partition_strategy)
         # YOUR CODE HERE
         self.filepath = filepath
+        self.outputs = outputs
+        self.filter = filter
         self.batch_size = batch_size
         self.scan_pointer = 1
-        self.first_execution = True
+
+        self.relation_tag = relation_tag
+
+        with open(self.filepath) as input_file:
+            input_reader = csv.reader(input_file, delimiter=" ")
+            column_headers = input_reader.__next__()[1:]
+        
+        for i in range(len(column_headers)): # Assign indices to the column headers
+            Scan.column_headers_to_index[column_headers[i]] = str(Scan.scan_operator_number)+"_"+str(i)
+        Scan.scan_operator_number += 1
 
     # Returns next batch of tuples in given file (or None if file exhausted)
     def get_next(self):
-        # YOUR CODE HERE
         logger.debug("In scan opertor =====")
-        if(self.first_execution):
-            with open(self.filepath) as input_file:
-                input_reader = csv.reader(input_file, delimiter=" ")
-                column_headers = input_reader.__next__()
-            self.first_execution = False
-
         output_data = []
 
         with open(self.filepath) as input_file:
             output_data = [ATuple(tuple = tuple(map(int, row.split(" ")))) for idx, row in enumerate(input_file) if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size)]
 
         self.scan_pointer += self.batch_size
-        return output_data, self.batch_size
+
+        if(output_data != []):
+            return output_data, Scan.column_headers_to_index
+        else:
+            return None, Scan.column_headers_to_index
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -184,7 +196,23 @@ class Scan(Operator):
 
     # Starts the process of reading tuples (only for push-based evaluation)
     def start(self):
-        pass
+        # while(True):
+        logger.debug("In scan opertor push-based =====")
+        output_data = []
+        while(True):
+            with open(self.filepath) as input_file:
+                output_data = [ATuple(tuple = tuple(map(int, row.split(" ")))) for idx, row in enumerate(input_file) if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size)]
+
+            self.scan_pointer += self.batch_size
+
+            annotated_data = [Scan.column_headers_to_index, output_data, self.relation_tag] # the list contains information about the column headers in all the relations and information about the source relation (Left / Right)
+
+            if(output_data != []):
+                self.outputs[0].apply(annotated_data)
+            else:
+                self.outputs[0].apply(None)
+                break
+
             
 
 # Equi-join operator
@@ -230,6 +258,12 @@ class Join(Operator):
         self.right_inputs = right_inputs
         self.left_join_attribute = left_join_attribute
         self.right_join_attribute = right_join_attribute
+        self.outputs = outputs
+
+        self.is_first_call = True
+        self.left_relation_hash = collections.defaultdict(list)
+        self.right_relation_hash = collections.defaultdict(list)
+        self.table_to_hash = 0
 
     # Returns next batch of joined tuples (or None if done)
     def get_next(self):
@@ -237,32 +271,36 @@ class Join(Operator):
         logger.info("In Join operator pull-based======")
         print()
 
-        left_relation_hash = collections.defaultdict(list)
-
-        for operator in self.left_inputs:
-            while(True):
-                left_input, batch_size = operator.get_next()
-                # Collect the left relation into a dictionary (hashing)
-                for atup_left in left_input:
-                    left_relation_hash[str(atup_left.tuple[1])].append(atup_left.tuple)
-                if(len(left_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
-                    break
-        
-        # logger.debug(left_relation_hash["1190"]) # returns empty list if key not found
-        logger.info("Completed hashing phase. Starting probing phase====")
         output_from_probing = []
 
-        for operator in self.right_inputs:
-            while(True):
-                right_input, batch_size = operator.get_next()
-                # Collect the right relation in batches and compare with the previously created dictionary (probing)
-                for atup_right in right_input:
-                    if(left_relation_hash[str(atup_right.tuple[0])] != []):
-                        output_from_probing.append(atup_right.tuple[2])
-                if(len(right_input) < batch_size): # alter break condition, because after filtering, batch size might be cut down
-                    break
+        if(self.is_first_call):
+            self.is_first_call = False
+            for operator in self.left_inputs:
+                while(True):
+                    left_input, column_headers_to_index = operator.get_next()
+                    if(left_input is None):
+                        break
+                    # Collect the left relation into a dictionary (hashing) only on the first call
+                    for atup_left in left_input:
+                        self.left_relation_hash[str(atup_left.tuple[self.left_join_attribute])].append(atup_left)
+            
+            # logger.debug(self.left_relation_hash["1769"]) # returns empty list if key not found
+            logger.info("Completed hashing phase. Starting probing phase====")
 
-        return output_from_probing # list of list of tuples
+        for operator in self.right_inputs:
+            # while(True):
+            right_input, column_headers_to_index = operator.get_next()
+            if(right_input is None):
+                break
+            # Collect the right relation in batches and compare with the previously created dictionary (probing)
+            for atup_right in right_input:
+                matching_key = self.left_relation_hash[str(atup_right.tuple[self.right_join_attribute])]
+                if(matching_key != []):
+                    for element in matching_key:
+                        output_from_probing.append((element, atup_right))
+
+        # logger.debug(output_from_probing[0])
+        return output_from_probing, column_headers_to_index # list of tuple of tuples
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -277,8 +315,37 @@ class Join(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        output_from_probing = []
 
+        if(tuples is not None):
+            # split tuples L and R
+            # if(self.table_to_hash%2):
+            if(tuples[2] == "L"): # Probe the right relation hash and then hash the left relation
+                for tup in tuples[1]:
+                    probing_key = str(tup.tuple[self.left_join_attribute])
+                    if(probing_key in self.right_relation_hash.keys()):
+                        matching_key = self.right_relation_hash[probing_key]
+                        if(matching_key != []):
+                            for element in matching_key:
+                                output_from_probing.append((element, tup))
+                    self.left_relation_hash[str(tup.tuple[self.left_join_attribute])].append(tup)
+
+            if(tuples[2] == "R"):
+                for tup in tuples[1]:
+                    probing_key = str(tup.tuple[self.right_join_attribute])
+                    if(probing_key in self.left_relation_hash.keys()):
+                        matching_key = self.left_relation_hash[probing_key]
+                        if(matching_key != []):
+                            for element in matching_key:
+                                output_from_probing.append((element, tup))
+                self.right_relation_hash[str(tup.tuple[self.right_join_attribute])].append(tup)
+
+            annotated_output = [tuples[0], output_from_probing, tuples[2]]
+            self.outputs[0].apply(annotated_output)
+
+            return
+        else:
+            self.outputs[0].apply(None)
 
 
 
@@ -318,12 +385,24 @@ class Project(Operator):
                                       pull=pull,
                                       partition_strategy=partition_strategy)
         # YOUR CODE HERE
-        pass
+        self.inputs = inputs
+        self.outputs = outputs
+        self.fields_to_keep = fields_to_keep
+
+        self.column_headers_to_index = []
 
     # Return next batch of projected tuples (or None if done)
     def get_next(self):
-        # YOUR CODE HERE
-        pass
+        projected_column = []
+        for operator in self.inputs:
+            output, column_headers_to_index = operator.get_next()
+            self.column_headers_to_index = column_headers_to_index
+            project_fields_to_index = list(map(int, column_headers_to_index[self.fields_to_keep[0]].split("_")))
+            
+            for element in output:
+                projected_column.append(element[project_fields_to_index[0]].tuple[project_fields_to_index[1]])
+        
+        return projected_column, column_headers_to_index
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -337,8 +416,21 @@ class Project(Operator):
         pass
 
     # Applies the operator logic to the given list of tuples
-    def apply(self, tuples: List[ATuple]):
-        pass
+    def apply(self, tuples: List[ATuple]): # add column_headers_to_index in the function call from join
+        if(tuples is not None):
+            projected_column = []
+            column_headers_to_index = tuples[0]
+            project_fields_to_index = list(map(int, column_headers_to_index[self.fields_to_keep[0]].split("_")))
+            
+            if(tuples[1] != []):
+                for element in tuples[1]:
+                    projected_column.append(element[project_fields_to_index[0]].tuple[project_fields_to_index[1]])
+            
+                self.outputs[0].apply(projected_column)
+            else:
+                return
+        else:
+            self.outputs[0].apply(None)
 
 # Group-by operator
 class GroupBy(Operator):
@@ -381,16 +473,21 @@ class GroupBy(Operator):
         self.inputs = inputs
         self.outputs = outputs
         self.agg_fun = agg_fun
-        self.inputs = inputs
         self.key = key
         self.value = value
+
+        self.input_tuples = []
 
     # Returns aggregated value per distinct key in the input (or None if done)
     def get_next(self):
         logger.debug("In group by operator===")
         for operator in self.inputs:
-            output_from_probing = operator.get_next()
-            logger.debug(average(output_from_probing))
+            while(True):
+                output_from_probing, column_headers_to_index = operator.get_next()
+                if(output_from_probing == []): # is None
+                    break
+                self.input_tuples += output_from_probing # this is a list of list
+            logger.debug(self.agg_fun(self.input_tuples))
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -405,7 +502,14 @@ class GroupBy(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        if(tuples is not None):
+            if(tuples != []):
+                self.input_tuples += tuples
+            else:
+                return
+        else:
+            if(self.input_tuples != []):
+                logger.debug(self.agg_fun(self.input_tuples))
 
 # Custom histogram operator
 class Histogram(Operator):
@@ -604,20 +708,27 @@ class Select(Operator):
         self.inputs = inputs
         self.outputs = outputs
         self.predicate = predicate
-        self.batch_size = 0
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
         logger.debug("In select operator===")
         for operator in self.inputs:
-            output_data, batch_size = operator.get_next()
-        filtered_output_data = self.predicate(output_data)
-        return filtered_output_data, batch_size
+            output_data, column_headers_to_index = operator.get_next()
+            filtered_output_data = self.predicate(output_data)
+        return filtered_output_data, column_headers_to_index
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        if(tuples is not None):
+            filtered_output_data = self.predicate(tuples[1])
+            tuples[1] = filtered_output_data.copy()
+            self.outputs[0].apply(tuples)
+            return
+        else:
+            self.outputs[0].apply(None)
+            
 
+        
 
 if __name__ == "__main__":
 
@@ -634,44 +745,65 @@ if __name__ == "__main__":
     # YOUR CODE HERE
 
     batch_size = int(input("Please enter preferred batch size for reading input relations: "))
+    movie_id = int(input("Please enter the movie id: "))
+    user_id = int(input("Please enter the user id: "))
 
+    ## -------------------------
     ## Pull-based
+    ## -------------------------
 
     relation_1 = "./data/friends.txt"
     relation_2 = "./data/movie_ratings.txt"
-    scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size)
-    scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size)
-
+    # scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size, relation_tag="L")
+    # scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size, relation_tag="R")
 
 
     def relation_filter_left(scan_output_left):
-        if(scan_operator_left is not None):
-            filter_output_left = [row for row in scan_output_left if(row.tuple[0] == 10)]
-        return filter_output_left
-
-    # pr1int("Filter debug=======================", relation_filter_left(scan_operator_left.get_next()[0])) # Testing the select(filter) operator
+        if(scan_output_left is not None):
+            filter_output_left = [row for row in scan_output_left if(row.tuple[0] == user_id)]
+            return filter_output_left
 
     def relation_filter_right(scan_output_right):
-        if(scan_operator_right is not None):
-            filter_output_right = [row for row in scan_output_right if(row.tuple[1] == 3)]
-        return filter_output_right
+        if(scan_output_right is not None):
+            filter_output_right = [row for row in scan_output_right if(row.tuple[1] == movie_id)]
+            return filter_output_right
 
-    filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
-    filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
-
-
+    # filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
+    # filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
 
 
-    join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=2, right_join_attribute=1)
+    # join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
+
+
+    # project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
+
 
     def avg(input_tuples):
         return average(input_tuples)
 
-    average_operator = GroupBy(inputs=[join_operator], outputs=[], agg_fun=avg, key=4 , value=5)
-    average_operator.get_next()
+    # average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=avg, key=4 , value=5)
+    # average_operator.get_next()
 
 
 
+    ## -------------------------
+    ## Push-based
+    ## -------------------------
+
+    average_operator = GroupBy(inputs=[], outputs=[], agg_fun=avg, key=4 , value=5)
+
+    project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["Rating"])
+
+    join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
+
+    filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
+    filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)    
+
+    scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], batch_size=batch_size, relation_tag="L")
+    scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], batch_size=batch_size, relation_tag="R")
+
+    scan_operator_left.start()
+    scan_operator_right.start()
     
 
 
