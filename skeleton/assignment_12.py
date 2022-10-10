@@ -540,7 +540,11 @@ class GroupBy(Operator):
                     output_data.append(ATuple(group))
 
                 annotated_output = [self.column_header_to_index, output_data]
-                self.outputs[0].apply(annotated_output)
+                if(self.outputs == []):
+                    for item in output_data:
+                        logger.info(item.tuple)
+                else:
+                    self.outputs[0].apply(annotated_output)
 
 
 # Custom histogram operator
@@ -886,7 +890,7 @@ if __name__ == "__main__":
     #        LIMIT 1 )
 
     # YOUR CODE HERE
-    if(args.task == "2"):
+    if(args.query == "2"):
         if(args.pull == "1"):
             pass
         else:
