@@ -537,7 +537,7 @@ class GroupBy(Operator):
                 grouped_data = list(self.agg_fun(self.input_tuples, self.key, self.value))
                 for group in grouped_data:
                     # logger.debug(group)
-                    output_data.append(ATuple(group))
+                    output_data.append(ATuple(group)) 
 
                 annotated_output = [self.column_header_to_index, output_data]
                 if(self.outputs == []):
