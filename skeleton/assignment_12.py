@@ -2,18 +2,24 @@ from __future__ import absolute_import
 from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
+import argparse
 import collections
 
 import csv
 from email import header
 import logging
 from enum import Enum
+import math
+import operator
+from statistics import mean
 from turtle import right
 from typing import List, Tuple
+from unittest import case
 import uuid
-from numpy import average
+# from numpy import average
+from itertools import count, groupby
 
-from yaml import scan
+# from yaml import scan
 
 # import ray
 
@@ -400,7 +406,10 @@ class Project(Operator):
             project_fields_to_index = list(map(int, column_headers_to_index[self.fields_to_keep[0]].split("_")))
             
             for element in output:
-                projected_column.append(element[project_fields_to_index[0]].tuple[project_fields_to_index[1]])
+                temp = []
+                for index in project_fields_to_index:
+                    temp.append(element[index[0]].tuple[index[1]])
+                projected_column.append(ATuple(tuple(temp)))
         
         return projected_column, column_headers_to_index
 
@@ -420,17 +429,24 @@ class Project(Operator):
         if(tuples is not None):
             projected_column = []
             column_headers_to_index = tuples[0]
-            project_fields_to_index = list(map(int, column_headers_to_index[self.fields_to_keep[0]].split("_")))
+            project_fields_to_index = []
+            for field in self.fields_to_keep:
+                project_fields_to_index.append(list(map(int, column_headers_to_index[field].split("_"))))
             
             if(tuples[1] != []):
                 for element in tuples[1]:
-                    projected_column.append(element[project_fields_to_index[0]].tuple[project_fields_to_index[1]])
+                    temp = []
+                    for index in project_fields_to_index:
+                        temp.append(element[index[0]].tuple[index[1]])
+                    projected_column.append(ATuple(tuple(temp)))
             
-                self.outputs[0].apply(projected_column)
+                annotated_output = [tuples[0], projected_column]
+                self.outputs[0].apply(annotated_output)
             else:
                 return
         else:
             self.outputs[0].apply(None)
+
 
 # Group-by operator
 class GroupBy(Operator):
@@ -477,6 +493,7 @@ class GroupBy(Operator):
         self.value = value
 
         self.input_tuples = []
+        self.column_header_to_index = {}
 
     # Returns aggregated value per distinct key in the input (or None if done)
     def get_next(self):
@@ -486,8 +503,12 @@ class GroupBy(Operator):
                 output_from_probing, column_headers_to_index = operator.get_next()
                 if(output_from_probing == []): # is None
                     break
-                self.input_tuples += output_from_probing # this is a list of list
-            logger.debug(self.agg_fun(self.input_tuples))
+                self.input_tuples += output_from_probing # a list of list
+
+            output_data = []
+            grouped_data = list(self.agg_fun(self.input_tuples, self.key, self.value))
+            for group in grouped_data:
+                output_data.append(ATuple(group))
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -502,14 +523,25 @@ class GroupBy(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
+        output_data = []
+        annotated_output = []
         if(tuples is not None):
-            if(tuples != []):
-                self.input_tuples += tuples
+            # logger.debug(tuples[1])
+            self.column_header_to_index = tuples[0]
+            if(tuples[1] != []):
+                self.input_tuples += tuples[1]
             else:
                 return
         else:
             if(self.input_tuples != []):
-                logger.debug(self.agg_fun(self.input_tuples))
+                grouped_data = list(self.agg_fun(self.input_tuples, self.key, self.value))
+                for group in grouped_data:
+                    # logger.debug(group)
+                    output_data.append(ATuple(group))
+
+                annotated_output = [self.column_header_to_index, output_data]
+                self.outputs[0].apply(annotated_output)
+
 
 # Custom histogram operator
 class Histogram(Operator):
@@ -555,7 +587,8 @@ class Histogram(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        if(tuples is not None):
+            pass
 
 # Order by operator
 class OrderBy(Operator):
@@ -593,8 +626,11 @@ class OrderBy(Operator):
                                       propagate_prov=propagate_prov,
                                       pull=pull,
                                       partition_strategy=partition_strategy)
-        # YOUR CODE HERE
-        pass
+        
+        self.inputs = inputs
+        self.outputs = outputs
+        self.comparator = comparator
+        self.ASC = ASC
 
     # Returns the sorted input (or None if done)
     def get_next(self):
@@ -614,7 +650,16 @@ class OrderBy(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        if(tuples is not None):
+            if(self.ASC):
+                tuple_list = [value.tuple for value in tuples[1]]
+                # Sort list by the first element
+                sorted_list = self.comparator(tuple_list, key=lambda x:x[0])
+
+                output_data = [ATuple(item) for item in sorted_list]
+
+                annotated_output = [tuples[0], output_data]
+                self.outputs[0].apply(annotated_output)
 
 # Top-k operator
 class TopK(Operator):
@@ -649,8 +694,10 @@ class TopK(Operator):
                                    propagate_prov=propagate_prov,
                                    pull=pull,
                                    partition_strategy=partition_strategy)
-        # YOUR CODE HERE
-        pass
+       
+        self.inputs = inputs
+        self.outputs = outputs
+        self.k = k
 
     # Returns the first k tuples in the input (or None if done)
     def get_next(self):
@@ -670,7 +717,9 @@ class TopK(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        pass
+        if(tuples is not None):
+            logger.debug(tuples[1][0].tuple)
+
 
 # Filter operator
 class Select(Operator):
@@ -727,12 +776,46 @@ class Select(Operator):
         else:
             self.outputs[0].apply(None)
             
+def relation_filter_left(scan_output_left):
+        if(scan_output_left is not None):
+            filter_output_left = [row for row in scan_output_left if(row.tuple[0] == user_id)]
+            return filter_output_left
 
-        
+def relation_filter_right(scan_output_right):
+    if(scan_output_right is not None):
+        filter_output_right = [row for row in scan_output_right if(row.tuple[1] == movie_id)]
+        return filter_output_right
+
+def avg(input_tuples, key_, value):
+        tuple_list = [value.tuple for value in input_tuples]
+        if(key_ == -1):
+            return [math.average(tuple_list)]
+        else:
+            # Sort list by the first element
+            sorted_list = sorted(tuple_list, key=lambda x:x[key_])
+            
+            # Group by first element
+            grouped_list = groupby(sorted_list, operator.itemgetter(0))
+
+            # Generator object to return average per key
+            for key, subiter in grouped_list:
+                yield key, mean(item[value] for item in subiter)
+    
 
 if __name__ == "__main__":
 
     logger.info("Assignment #1")
+
+    # Initialize parser
+    parser = argparse.ArgumentParser()
+
+    options_list = ["query", "ff", "mf", "uid", "mid", "pull"]
+    # "pull", "output"
+
+    for argument in options_list:
+        parser.add_argument("--"+argument)
+
+    args = parser.parse_args()
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
@@ -745,65 +828,49 @@ if __name__ == "__main__":
     # YOUR CODE HERE
 
     batch_size = int(input("Please enter preferred batch size for reading input relations: "))
-    movie_id = int(input("Please enter the movie id: "))
-    user_id = int(input("Please enter the user id: "))
+    movie_id = int(args.mid)
+    user_id = int(args.uid)
 
-    ## -------------------------
-    ## Pull-based
-    ## -------------------------
+    relation_1 = args.ff
+    relation_2 = args.mf
 
-    relation_1 = "./data/friends.txt"
-    relation_2 = "./data/movie_ratings.txt"
-    # scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size, relation_tag="L")
-    # scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size, relation_tag="R")
+    if(args.query == "1"):
+        if(args.pull == "1"):
+            ## -------------------------
+            ## Pull-based
+            ## -------------------------
+            scan_operator_left = Scan(filepath=relation_1, outputs=[], batch_size=batch_size, relation_tag="L")
+            scan_operator_right = Scan(filepath=relation_2, outputs=[], batch_size=batch_size, relation_tag="R")
 
+            filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
+            filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
 
-    def relation_filter_left(scan_output_left):
-        if(scan_output_left is not None):
-            filter_output_left = [row for row in scan_output_left if(row.tuple[0] == user_id)]
-            return filter_output_left
+            join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
 
-    def relation_filter_right(scan_output_right):
-        if(scan_output_right is not None):
-            filter_output_right = [row for row in scan_output_right if(row.tuple[1] == movie_id)]
-            return filter_output_right
+            project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
 
-    # filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
-    # filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
+            average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=avg, key=4 , value=5)
+            average_operator.get_next()
 
+        else:
+            ## -------------------------
+            ## Push-based
+            ## -------------------------
+            average_operator = GroupBy(inputs=[], outputs=[], agg_fun=avg, key=0, value=1) # key and value are attribute numbers after projection
+            # key = -1 means only 1 column was projected
 
-    # join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
+            project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["MID", "Rating"])
 
+            join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
 
-    # project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
+            filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
+            filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)  
 
+            scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], batch_size=batch_size, relation_tag="L")
+            scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], batch_size=batch_size, relation_tag="R")
 
-    def avg(input_tuples):
-        return average(input_tuples)
-
-    # average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=avg, key=4 , value=5)
-    # average_operator.get_next()
-
-
-
-    ## -------------------------
-    ## Push-based
-    ## -------------------------
-
-    average_operator = GroupBy(inputs=[], outputs=[], agg_fun=avg, key=4 , value=5)
-
-    project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["Rating"])
-
-    join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
-
-    filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
-    filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)    
-
-    scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], batch_size=batch_size, relation_tag="L")
-    scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], batch_size=batch_size, relation_tag="R")
-
-    scan_operator_left.start()
-    scan_operator_right.start()
+            scan_operator_left.start()
+            scan_operator_right.start()
     
 
 
@@ -819,6 +886,29 @@ if __name__ == "__main__":
     #        LIMIT 1 )
 
     # YOUR CODE HERE
+    if(args.task == "2"):
+        if(args.pull == "1"):
+            pass
+        else:
+            limit_operator = TopK(inputs=[], outputs=[], k=1)
+
+            orderby_operator = OrderBy(inputs=[], outputs=[limit_operator], comparator=sorted)
+
+            average_operator = GroupBy(inputs=[], outputs=[orderby_operator], agg_fun=avg, key=0, value=1) # key and value are attribute numbers after projection
+            # key = -1 means only 1 column was projected
+
+            project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["MID", "Rating"])
+
+            join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
+
+            filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
+            filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)  
+
+            scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], batch_size=batch_size, relation_tag="L")
+            scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], batch_size=batch_size, relation_tag="R")
+
+            scan_operator_left.start()
+            scan_operator_right.start()
 
 
     # TASK 3: Implement explanation query for User A and Movie M
