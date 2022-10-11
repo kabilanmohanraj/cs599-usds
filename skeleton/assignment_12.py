@@ -581,8 +581,12 @@ class Histogram(Operator):
                                         propagate_prov=propagate_prov,
                                         pull=pull,
                                         partition_strategy=partition_strategy)
-        # YOUR CODE HERE
-        pass
+        
+        self.inputs = inputs
+        self.outputs = outputs
+        self.key = key
+
+        self.input_tuples = []
 
     # Returns histogram (or None if done)
     def get_next(self):
@@ -592,7 +596,28 @@ class Histogram(Operator):
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
         if(tuples is not None):
-            pass
+            if(tuples[1] != []):
+                self.input_tuples += tuples[1]
+            else:
+                return
+        else:
+            tuple_list = [value.tuple for value in self.input_tuples]
+            # Sort list by the first element
+            sorted_list = sorted(tuple_list, key=lambda x:x[self.key])
+            
+            # Group by first element
+            grouped_list = groupby(sorted_list, operator.itemgetter(self.key))
+
+            # Nested function with the generator object to return count per key
+            def histogram_generator():
+                for key, subiter in grouped_list:
+                    yield key, sum(1 for _ in subiter)
+            
+            histogram = list(histogram_generator())
+            logger.debug(histogram)
+
+            
+
 
 # Order by operator
 class OrderBy(Operator):
@@ -923,7 +948,28 @@ if __name__ == "__main__":
     #       AND F.UID1 = 'A'
     #       AND R.MID = 'M'
 
-    # YOUR CODE HERE
+    if(args.query == "3"):
+        if(args.pull == "1"):
+            pass
+        else:
+            ## -------------------------
+            ## Push-based
+            ## -------------------------
+            histogram_operator = Histogram(inputs=[], outputs=[], key=1) # key and value are attribute numbers after projection
+            # key = -1 means only 1 column was projected
+
+            project_operator = Project(inputs=[], outputs=[histogram_operator], fields_to_keep=["MID", "Rating"])
+
+            join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
+
+            filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
+            filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)  
+
+            scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], batch_size=batch_size, relation_tag="L")
+            scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], batch_size=batch_size, relation_tag="R")
+
+            scan_operator_left.start()
+            scan_operator_right.start()
 
 
     # TASK 4: Turn your data operators into Ray actors
