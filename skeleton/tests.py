@@ -1,6 +1,6 @@
 import assignment_12
 import getopt, sys
-# import pytest
+import pytest
 
 import argparse
 
