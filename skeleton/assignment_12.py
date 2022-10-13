@@ -973,7 +973,7 @@ class Sink(Operator):
     # Writes the tuples to the CSV file with column headers
     def write_to_csv(self, tuples):
         with open(self.filepath, 'w') as output_file:
-            output_writer = csv.writer(output_file, delimiter=" ")
+            output_writer = csv.writer(output_file, delimiter=",")
             output_writer.writerow(tuples[0]) # Write column headers
             for item in tuples[1]:
                 output_writer.writerow(item.tuple)
