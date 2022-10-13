@@ -3,27 +3,24 @@ from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
 import argparse
-from ast import alias
-from audioop import reverse
 import collections
 
 import csv
 from email import header
 import logging
 from enum import Enum
-import math
-import operator
 from statistics import mean
 from turtle import right
 from typing import List, Tuple
 from unittest import case
 import uuid
 # from numpy import average
-from itertools import count, groupby
 
 # from yaml import scan
 
-# import ray
+import ray
+
+ray.init()
 
 # Note (john): Make sure you use Python's logger to log
 #              information about your program
@@ -535,7 +532,6 @@ class GroupBy(Operator):
                                       propagate_prov=propagate_prov,
                                       pull=pull,
                                       partition_strategy=partition_strategy)
-        # YOUR CODE HERE
         self.inputs = inputs
         self.outputs = outputs
         self.agg_fun = agg_fun
