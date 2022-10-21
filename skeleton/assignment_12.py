@@ -1163,7 +1163,7 @@ if __name__ == "__main__":
 
             project_operator = Project(inputs=[limit_operator], outputs=[], fields_to_keep=["MID"], aliasing=False)
 
-            sink_operator = Sink(inputs=[project_operator], filepath=args.output)
+            sink_operator = Sink(inputs=[orderby_operator], filepath=args.output)
             sink_operator.get_next()
         else:
             ## -------------------------

@@ -79,7 +79,7 @@ def test_pull_groupby_operator():
     project_operator = Project(inputs=[scan_operator], outputs=[], fields_to_keep=["MID", "Rating"])
     groupby_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=1)
 
-    correct_result = [(1,4.2), (2,3.5)]
+    correct_result = [(1,4.2), (2,3.6)]
 
     groupby_operator_output = groupby_operator.get_next()
     
@@ -95,17 +95,14 @@ def test_pull_orderby_operator():
 
     orderby_operator_output = orderby_operator.get_next()
 
-    correct_result = [(1,1,5), (1,2,4), (1,2,3),
-                      (2,1,4), (2,2,5),
-                      (3,1,5), (3,2,5),
-                      (4,1,4), (4,2,2),
-                      (5,1,3), (5,2,2)
-                      ]
+    correct_result = [(1, 1, 5), (2, 1, 4), (3, 1, 5), (4, 1, 4), (5, 1, 3), (1, 2, 4), (2, 2, 5), (3, 2, 5), (4, 2, 2), (5, 2, 2)]
 
     result_to_check = []
     for item in orderby_operator_output[1]:
         result_to_check.append(item.tuple)
     
+    print(correct_result)
+    print(result_to_check)
     assert(correct_result == result_to_check)  
 
 def test_pull_topk_operator():
@@ -129,7 +126,7 @@ def test_pull_histogram_operator():
     project_operator = Project(inputs=[scan_operator], outputs=[], fields_to_keep=["Rating"])
     groupby_operator = Histogram(inputs=[project_operator], outputs=[], key=0)
 
-    correct_result = [(5,4), (4,3), (2,2), (3,2)]
+    correct_result = [(5,4), (4,3), (2,2), (3,1)]
 
     groupby_operator_output = groupby_operator.get_next()
     
@@ -236,7 +233,7 @@ def test_push_groupby_operator():
     scan_operator_1.start()
     scan_operator_2.start()
     
-    correct_result = [(1,4.2), (2,3.5)]
+    correct_result = [(1,4.2), (2,3.6)]
     sink_output = sink_operator.output_data
     
     result_to_check = []
@@ -256,7 +253,7 @@ def test_push_orderby_operator():
     scan_operator_1.start()
     scan_operator_2.start()
     
-    correct_result = correct_result = [(2,3.5), (1,4.2)]
+    correct_result = correct_result = [(2,3.6), (1,4.2)]
     sink_output = sink_operator.output_data
     
     result_to_check = []
@@ -277,7 +274,7 @@ def test_push_topk_operator():
     scan_operator_1.start()
     scan_operator_2.start()
     
-    correct_result = correct_result = [(2,3.5)]
+    correct_result = correct_result = [(2,3.6)]
     sink_output = sink_operator.output_data
     
     result_to_check = []
@@ -294,7 +291,7 @@ def test_push_histogram_operator():
 
     scan_operator_1.start()
     
-    correct_result = [(5,4), (4,3), (2,2), (3,2)]
+    correct_result = [(5,4), (4,3), (2,2), (3,1)]
     sink_output = sink_operator.output_data
     
     result_to_check = []
