@@ -778,7 +778,7 @@ class OrderBy(Operator):
             else:
                 reversed = True
             # Sort list by the first element
-            sorted_list = self.comparator(tuple_list, key=lambda x:x[0], reverse=reversed)
+            sorted_list = self.comparator(tuple_list, key=lambda x:x[1], reverse=reversed)
             output_data = [ATuple(item) for item in sorted_list]
 
         annotated_output = [tuples[0], output_data]
