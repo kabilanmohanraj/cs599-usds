@@ -476,15 +476,15 @@ class Project(Operator):
                     try: # For nested tuples
                         for element in tuples[1]:
                             flattened_tuple = tuple()
-                            for item in element:
-                                for sub_item in item.tuple:
+                            for item in element.tuple:
+                                for sub_item in item:
                                     flattened_tuple += (sub_item,)
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(flattened_tuple[index])
                             projected_column.append(ATuple(tuple(temp,)))
                     except: # For flat tuples
-                        for element in tuples[1]: 
+                        for element in tuples[1]:
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(element.tuple[index])
@@ -545,6 +545,7 @@ class GroupBy(Operator):
         self.column_headers = []
         self.grouping_dict = collections.defaultdict(list)
         self.is_first_none = True
+        # self.nones_received = True
 
     # Returns aggregated value per distinct key in the input (or None if done)
     def get_next(self):
@@ -573,8 +574,10 @@ class GroupBy(Operator):
                     output_data.append(ATuple((int(dict_item[1][self.key]), output_dict[dict_item[1][self.key]])))
         
         annotated_output = [tuples[0], output_data]
-        return annotated_output
 
+        if(tuples[1] is None): 
+            return annotated_output
+            
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
         # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
@@ -600,16 +603,21 @@ class GroupBy(Operator):
             else:
                 return
         else:
-            if(self.is_first_none):
+            if(self.is_first_none): # is nth none
                 self.is_first_none = False
+                return
             else:
                 output_dict = {}
                 if(self.key == 0 and self.value == 0):
-                    output_data += [
-                        ATuple(
-                            (self.agg_fun(self.grouping_dict[str(self.key)]),)
-                            )
-                        ]
+                    try:
+                        output_data += [
+                            ATuple(
+                                (self.agg_fun(self.grouping_dict[str(self.key)]),)
+                                )
+                            ]
+                    except:
+                        if(self.outputs != []):
+                            self.outputs[0].apply([self.column_headers, None])
                 else:
                     for dict_item in enumerate(self.grouping_dict.items()):
                         output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
@@ -688,7 +696,7 @@ class Histogram(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        if(tuples is not None):
+        if(tuples[1] is not None):
             self.column_headers = tuples[0]
             if(tuples[1] != []):
                 for item in tuples[1]:
@@ -707,7 +715,6 @@ class Histogram(Operator):
                 self.outputs[0].apply(annotated_output)
 
             
-
 # Order by operator
 class OrderBy(Operator):
     """OrderBy operator.
@@ -750,17 +757,34 @@ class OrderBy(Operator):
         self.comparator = comparator
         self.ASC = ASC
 
+        self.collected_data = []
+
     # Returns the sorted input (or None if done)
     def get_next(self):
         for operator in self.inputs:
-            tuples = operator.get_next()
-            tuple_list = [value.tuple for value in tuples[1]]
+            if(operator.name in ["Scan"]):
+                while(True):
+                    tuples = operator.get_next()
+                    if(tuples[1] is None):
+                        break
+                    self.collected_data += tuples[1]
+            else:
+                tuples = operator.get_next()
+                self.collected_data = tuples[1]
+
+            tuple_list = [value.tuple for value in self.collected_data]
+            if(self.ASC):
+                reversed = False
+            else:
+                reversed = True
             # Sort list by the first element
-            sorted_list = self.comparator(tuple_list, key=lambda x:x[0])
+            sorted_list = self.comparator(tuple_list, key=lambda x:x[0], reverse=reversed)
             output_data = [ATuple(item) for item in sorted_list]
-            annotated_output = [tuples[0], output_data]
+
+        annotated_output = [tuples[0], output_data]
 
         return annotated_output
+            
 
 
     # Returns the lineage of the given tuples
@@ -776,7 +800,15 @@ class OrderBy(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        tuple_list = [value.tuple for value in tuples[1]]
+        # while(True):
+        #     print(tuples[1])
+        #     if(tuples[1] is None):
+        #         break
+        #     self.collected_data += tuples[1]
+
+        self.collected_data = tuples[1]
+
+        tuple_list = [value.tuple for value in self.collected_data]
         if(self.ASC):
             reversed = False
         else:
@@ -827,14 +859,29 @@ class TopK(Operator):
         self.outputs = outputs
         self.k = k
 
+        self.output_data = []
+
     # Returns the first k tuples in the input (or None if done)
     def get_next(self):
         for operator in self.inputs:
-            tuples = operator.get_next()
-            output_data = tuples[1][0:self.k]
-            annotated_output = [tuples[0], output_data]
-        
+            if(operator.name in ["Scan", "Select", "Project"]):
+                tuples = operator.get_next()
+                while(self.k>=0):
+                    if(tuples[1] is None):
+                        break
+                    self.output_data += tuples[1]
+                    self.k -= len(self.output_data)
+            else:
+                tuples = operator.get_next()
+                try:
+                    self.output_data = tuples[1][0:self.k]
+                except:
+                    self.output_data = tuples[1]
+
+            annotated_output = [tuples[0], self.output_data]
+
             return annotated_output
+                
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
@@ -917,7 +964,6 @@ class Select(Operator):
             self.outputs[0].apply([tuples[0], None])
 
 
-
 # Sink operator
 class Sink(Operator):
     """Sink operator.
@@ -958,16 +1004,27 @@ class Sink(Operator):
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
         for operator in self.inputs:
+            # if(operator.name in ["Scan", "Select", "Project", "TopK"]):
+            #     tuples = operator.get_next()
+            #     print(tuples)
+            #     while(True):
+            #         if(tuples[1] is None):
+            #             break
+            #         self.output_data += tuples[1]
+            # else:
             tuples = operator.get_next()
-            self.write_to_csv(tuples)
+            self.output_data = tuples[1]
+
+            annotated_output = [tuples[0], self.output_data]
+            self.write_to_csv(annotated_output)
         
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        if(tuples[1] is not None):
+        if(tuples[1] != [] and tuples[1] is not None):
             self.output_data += tuples[1]
-        else:
-            annotated_output = [tuples[0], self.output_data]
-            self.write_to_csv(annotated_output)
+        # else:
+        annotated_output = [tuples[0], self.output_data]
+        self.write_to_csv(annotated_output)
 
     
     # Writes the tuples to the CSV file with column headers
@@ -1010,6 +1067,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ## python assignment_12.py --query 1 --ff ../data/friends_toy.txt --mf ../data/movie_ratings_toy.txt --uid 1 --mid 1 --pull 1 --output ../query_output.csv
+
+    ## python assignment_12.py --query 1 --ff ../data/friends.txt --mf ../data/movie_ratings.txt --uid 1 --mid 0 --pull 0 --output ../query_output.csv
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
@@ -1106,7 +1165,6 @@ if __name__ == "__main__":
 
             sink_operator = Sink(inputs=[project_operator], filepath=args.output)
             sink_operator.get_next()
-
         else:
             ## -------------------------
             ## Push-based
