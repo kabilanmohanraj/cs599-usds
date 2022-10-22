@@ -3,6 +3,7 @@ from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
 import argparse
+from ast import operator
 import collections
 
 import csv
@@ -120,6 +121,7 @@ class Operator:
         logger.error("Apply method is not implemented!")
 
 # Scan operator
+@ray.remote
 class Scan(Operator):
     """Scan operator.
 
@@ -151,7 +153,8 @@ class Scan(Operator):
                  partition_strategy : PartitionStrategy = PartitionStrategy.RR,
                  batch_size=100000,
                  relation_tag="L"):
-        super(Scan, self).__init__(name="Scan",
+        Operator.__init__(self,
+                                   name="Scan",
                                    track_prov=track_prov,
                                    propagate_prov=propagate_prov,
                                    pull=pull,
@@ -209,9 +212,9 @@ class Scan(Operator):
             annotated_data = [self.column_headers, output_data, self.relation_tag] # the list contains information about the column headers in all the relations and information about the source of a relation (Left / Right)
 
             if(output_data != []):
-                self.outputs[0].apply(annotated_data)
+                self.outputs[0].apply.remote(annotated_data)
             else:
-                self.outputs[0].apply([self.column_headers, None])
+                self.outputs[0].apply.remote([self.column_headers, None])
                 break
 
             
@@ -353,10 +356,10 @@ class Join(Operator):
                 self.right_relation_hash[str(tup.tuple[self.right_join_attribute])].append(tup)
 
             annotated_output = [self.column_headers, output_from_probing]
-            self.outputs[0].apply(annotated_output)
+            self.outputs[0].apply.remote(annotated_output)
             return
         else:
-            self.outputs[0].apply([tuples[0], None])
+            self.outputs[0].apply.remote([tuples[0], None])
 
 
 
@@ -459,7 +462,7 @@ class Project(Operator):
     def apply(self, tuples: List[ATuple]): # add column_headers_to_index in the function call from join
         if(self.aliasing):
             annotated_output = [self.fields_to_keep, tuples[1]]
-            self.outputs[0].apply(annotated_output)
+            self.outputs[0].apply.remote(annotated_output)
         else:
             if(tuples[1] is not None):
                 projected_column = []
@@ -488,11 +491,11 @@ class Project(Operator):
                             projected_column.append(ATuple(tuple(temp,)))
                             
                     annotated_output = [self.fields_to_keep, projected_column]
-                    self.outputs[0].apply(annotated_output)
+                    self.outputs[0].apply.remote(annotated_output)
                 else:
                     return
             else:
-                self.outputs[0].apply([tuples[0], None])
+                self.outputs[0].apply.remote([tuples[0], None])
 
 
 # Group-by operator
@@ -613,7 +616,7 @@ class GroupBy(Operator):
                             ]
                     except:
                         if(self.outputs != []):
-                            self.outputs[0].apply([self.column_headers, None])
+                            self.outputs[0].apply.remote([self.column_headers, None])
                 else:
                     for dict_item in enumerate(self.grouping_dict.items()):
                         output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
@@ -621,7 +624,7 @@ class GroupBy(Operator):
 
                 annotated_output = [self.column_headers, output_data]
                 if(self.outputs != []):
-                    self.outputs[0].apply(annotated_output)
+                    self.outputs[0].apply.remote(annotated_output)
 
 
 # Custom histogram operator
@@ -708,7 +711,7 @@ class Histogram(Operator):
 
             annotated_output = [self.column_headers, output_data]
             if(self.outputs != []):
-                self.outputs[0].apply(annotated_output)
+                self.outputs[0].apply.remote(annotated_output)
 
             
 # Order by operator
@@ -814,7 +817,7 @@ class OrderBy(Operator):
         output_data = [ATuple(item) for item in sorted_list]
         annotated_output = [tuples[0], output_data]
         if(self.outputs != []):
-            self.outputs[0].apply(annotated_output)
+            self.outputs[0].apply.remote(annotated_output)
 
 
 # Top-k operator
@@ -895,7 +898,7 @@ class TopK(Operator):
     def apply(self, tuples: List[ATuple]): 
         if(self.outputs != []):
             annotated_output = [tuples[0], tuples[1][0:self.k]]
-            self.outputs[0].apply(annotated_output)
+            self.outputs[0].apply.remote(annotated_output)
 
 
 # Filter operator
@@ -954,10 +957,10 @@ class Select(Operator):
         if(tuples[1] is not None):
             filtered_output_data = self.predicate(tuples[1])
             tuples[1] = filtered_output_data.copy()
-            self.outputs[0].apply(tuples)
+            self.outputs[0].apply.remote(tuples)
             return
         else:
-            self.outputs[0].apply([tuples[0], None])
+            self.outputs[0].apply.remote([tuples[0], None])
 
 
 # Sink operator
@@ -1010,7 +1013,7 @@ class Sink(Operator):
             # else:
             tuples = operator.get_next()
             self.output_data = tuples[1]
-
+            #self.finish_ray=false
             annotated_output = [tuples[0], self.output_data]
             self.write_to_csv(annotated_output)
         
@@ -1238,6 +1241,11 @@ if __name__ == "__main__":
 
             scan_operator_left.start()
             scan_operator_right.start()
+
+            ans=ray.get(sink_operator.getfinishray.remote())
+            while ans is False:
+                # sleep
+                ans=ray.get(sink_operator.getfinishray.remote())
 
 
     # TASK 4: Turn your data operators into Ray actors
