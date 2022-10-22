@@ -3,7 +3,6 @@ from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
 import argparse
-from ast import operator
 import collections
 
 import csv
@@ -15,13 +14,10 @@ from turtle import right
 from typing import List, Tuple
 from unittest import case
 import uuid
-# from numpy import average
-
-# from yaml import scan
 
 import ray
 
-ray.init()
+ray.init(ignore_reinit_error=True)
 
 # Note (john): Make sure you use Python's logger to log
 #              information about your program
