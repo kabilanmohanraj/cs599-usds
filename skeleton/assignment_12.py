@@ -11,19 +11,11 @@ import csv
 from email import header
 import logging
 from enum import Enum
-import math
-import operator
 from statistics import mean
 from turtle import right
 from typing import List, Tuple
 from unittest import case
 import uuid
-# from numpy import average
-from itertools import count, groupby
-
-# from yaml import scan
-
-# import ray
 
 # Note (john): Make sure you use Python's logger to log
 #              information about your program
@@ -329,7 +321,7 @@ class Join(Operator):
 
         if(tuples[1] is not None):
             # split tuples L and R
-            if(tuples[2] == "L"): # Probe the right relation hash and then hash the left relation
+            if(tuples[2] == "L"): # Probe the right relation hash, and then hash the left relation
                 if(self.is_first_call_left):
                     self.column_headers += tuples[0]
                     self.is_first_call_left = False
@@ -545,7 +537,6 @@ class GroupBy(Operator):
         self.column_headers = []
         self.grouping_dict = collections.defaultdict(list)
         self.is_first_none = True
-        # self.nones_received = True
 
     # Returns aggregated value per distinct key in the input (or None if done)
     def get_next(self):
@@ -668,10 +659,7 @@ class Histogram(Operator):
         self.key = key
 
         self.input_tuples = []
-        self.grouping_dict = collections.defaultdict(list) 
-        ## ---------------------------------------
-        ## can start with 0 and keep adding 1.
-        ## ---------------------------------------    
+        self.grouping_dict = collections.defaultdict(list)   
         
         self.column_headers = []
 
@@ -1004,14 +992,6 @@ class Sink(Operator):
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
         for operator in self.inputs:
-            # if(operator.name in ["Scan", "Select", "Project", "TopK"]):
-            #     tuples = operator.get_next()
-            #     print(tuples)
-            #     while(True):
-            #         if(tuples[1] is None):
-            #             break
-            #         self.output_data += tuples[1]
-            # else:
             tuples = operator.get_next()
             self.output_data = tuples[1]
 
@@ -1059,16 +1039,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     options_list = ["query", "ff", "mf", "uid", "mid", "pull", "output"]
-    # "pull", "output"
 
     for argument in options_list:
         parser.add_argument("--"+argument)
 
     args = parser.parse_args()
-
-    ## python assignment_12.py --query 1 --ff ../data/friends_toy.txt --mf ../data/movie_ratings_toy.txt --uid 1 --mid 1 --pull 1 --output ../query_output.csv
-
-    ## python assignment_12.py --query 1 --ff ../data/friends.txt --mf ../data/movie_ratings.txt --uid 1 --mid 0 --pull 0 --output ../query_output.csv
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
@@ -1078,7 +1053,6 @@ if __name__ == "__main__":
     #       AND F.UID1 = 'A'
     #       AND R.MID = 'M'
 
-    # YOUR CODE HERE
     movie_id = int(args.mid)
     user_id = int(args.uid)
 
@@ -1140,7 +1114,6 @@ if __name__ == "__main__":
     #        ORDER BY score DESC
     #        LIMIT 1 )
 
-    # YOUR CODE HERE
     if(args.query == "2"):
         if(args.pull == "1"):
             ## -------------------------
