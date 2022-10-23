@@ -10,7 +10,6 @@ from email import header
 import logging
 from enum import Enum
 from statistics import mean
-from turtle import right
 from typing import List, Tuple
 from unittest import case
 import uuid
@@ -150,11 +149,11 @@ class Scan(Operator):
                  batch_size=100000,
                  relation_tag="L"):
         Operator.__init__(self,
-                                   name="Scan",
-                                   track_prov=track_prov,
-                                   propagate_prov=propagate_prov,
-                                   pull=pull,
-                                   partition_strategy=partition_strategy)
+                          name="Scan",
+                          track_prov=track_prov,
+                          propagate_prov=propagate_prov,
+                          pull=pull,
+                          partition_strategy=partition_strategy)
         # YOUR CODE HERE
         self.filepath = filepath
         self.outputs = outputs
@@ -999,14 +998,6 @@ class Sink(Operator):
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
         for operator in self.inputs:
-            # if(operator.name in ["Scan", "Select", "Project", "TopK"]):
-            #     tuples = operator.get_next()
-            #     print(tuples)
-            #     while(True):
-            #         if(tuples[1] is None):
-            #             break
-            #         self.output_data += tuples[1]
-            # else:
             tuples = operator.get_next()
             self.output_data = tuples[1]
             #self.finish_ray=false
