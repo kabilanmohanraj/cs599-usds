@@ -12,7 +12,6 @@ from email import header
 import logging
 from enum import Enum
 from statistics import mean
-from turtle import right
 from typing import List, Tuple
 from unittest import case
 import uuid
@@ -45,11 +44,17 @@ class ATuple:
         self.tuple = tuple
         self.metadata = metadata
         self.operator = operator
+        self.tuple_identifier = _generate_uuid()
+    
+    def __hash__(self):
+        return int(self.tuple_identifier)
 
     # Returns the lineage of self
     def lineage(self) -> List[ATuple]:
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        self.operator.lineage(tuples=[self])
+    
+    def __eq__(self, other):
+        return (self.tuple, self.metadata, self.operator) == (other.tuple, other.metadata, other.operator)
 
     # Returns the Where-provenance of the attribute at index 'att_index' of self
     def where(self, att_index) -> List[Tuple]:
@@ -65,6 +70,7 @@ class ATuple:
     def responsible_inputs(self) -> List[Tuple]:
         # YOUR CODE HERE (ONLY FOR TASK 4 IN ASSIGNMENT 2)
         pass
+
 
 # Data operator
 class Operator:
@@ -95,6 +101,10 @@ class Operator:
         self.propagate_prov = propagate_prov
         self.pull = pull
         self.partition_strategy = partition_strategy
+        
+        # Dictionary to track input to output mapping
+        self.input_to_output_mapping = collections.defaultdict(List)
+
         logger.debug("Created {} operator with id {}".format(self.name,
                                                              self.id))
 
@@ -113,6 +123,7 @@ class Operator:
     # NOTE (john): Must be implemented by the subclasses
     def apply(self, tuples: List[ATuple]) -> bool:
         logger.error("Apply method is not implemented!")
+
 
 # Scan operator
 class Scan(Operator):
@@ -144,7 +155,7 @@ class Scan(Operator):
                  propagate_prov=False,
                  pull=True,
                  partition_strategy : PartitionStrategy = PartitionStrategy.RR,
-                 batch_size=100000,
+                 batch_size=1000000,
                  relation_tag="L"):
         super(Scan, self).__init__(name="Scan",
                                    track_prov=track_prov,
@@ -170,7 +181,11 @@ class Scan(Operator):
         output_data = []
 
         with open(self.filepath) as input_file:
-            output_data = [ATuple(tuple = tuple(map(int, row.split(" ")))) for idx, row in enumerate(input_file) if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size)]
+            for idx, row in enumerate(input_file):
+                if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size):
+                    processed_tuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
+                    self.input_to_output_mapping[processed_tuple] = processed_tuple
+                    output_data.append(processed_tuple)
 
         self.scan_pointer += self.batch_size
         
@@ -194,22 +209,27 @@ class Scan(Operator):
 
     # Starts the process of reading tuples (only for push-based evaluation)
     def start(self):
-        output_data = []
         while(True):
+            output_data = []
             with open(self.filepath) as input_file:
-                output_data = [ATuple(tuple = tuple(map(int, row.split(" ")))) for idx, row in enumerate(input_file) if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size)]
+                for idx, row in enumerate(input_file):
+                    if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size):
+                        processed_tuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
+                        self.input_to_output_mapping[processed_tuple] = processed_tuple
+                        output_data.append(processed_tuple)
 
             self.scan_pointer += self.batch_size
 
             annotated_data = [self.column_headers, output_data, self.relation_tag] # the list contains information about the column headers in all the relations and information about the source of a relation (Left / Right)
 
+            print(output_data)
             if(output_data != []):
                 self.outputs[0].apply(annotated_data)
             else:
                 self.outputs[0].apply([self.column_headers, None])
                 break
 
-            
+
 
 # Equi-join operator
 class Join(Operator):
@@ -345,7 +365,7 @@ class Join(Operator):
                         if(matching_key != []):
                             for element in matching_key:
                                 output_from_probing.append(ATuple((element.tuple, tup.tuple,)))
-                self.right_relation_hash[str(tup.tuple[self.right_join_attribute])].append(tup)
+                    self.right_relation_hash[str(tup.tuple[self.right_join_attribute])].append(tup)
 
             annotated_output = [self.column_headers, output_from_probing]
             self.outputs[0].apply(annotated_output)
@@ -490,6 +510,7 @@ class Project(Operator):
                 self.outputs[0].apply([tuples[0], None])
 
 
+
 # Group-by operator
 class GroupBy(Operator):
     """Group-by operator.
@@ -554,11 +575,12 @@ class GroupBy(Operator):
                         self.grouping_dict[str(item.tuple[self.key])].append(int(item.tuple[self.value]))
 
             if(self.key == 0 and self.value == 0):
-                output_data += [
-                        ATuple(
-                            (self.agg_fun(self.grouping_dict[str(self.key)]),)
-                            )
-                        ]
+                if(tuples[1] != [None]):
+                    output_data += [
+                            ATuple(
+                                (self.agg_fun(self.grouping_dict[str(self.key)]),)
+                                )
+                            ]
             else:
                 for dict_item in enumerate(self.grouping_dict.items()):
                     output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
@@ -617,6 +639,7 @@ class GroupBy(Operator):
                 annotated_output = [self.column_headers, output_data]
                 if(self.outputs != []):
                     self.outputs[0].apply(annotated_output)
+
 
 
 # Custom histogram operator
@@ -702,7 +725,8 @@ class Histogram(Operator):
             if(self.outputs != []):
                 self.outputs[0].apply(annotated_output)
 
-            
+
+
 # Order by operator
 class OrderBy(Operator):
     """OrderBy operator.
@@ -809,6 +833,7 @@ class OrderBy(Operator):
             self.outputs[0].apply(annotated_output)
 
 
+
 # Top-k operator
 class TopK(Operator):
     """TopK operator.
@@ -890,6 +915,7 @@ class TopK(Operator):
             self.outputs[0].apply(annotated_output)
 
 
+
 # Filter operator
 class Select(Operator):
     """Select operator.
@@ -929,27 +955,39 @@ class Select(Operator):
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
+        processed_tuples = []
         for operator in self.inputs:
             tuples = operator.get_next()
             if(self.predicate is None):
                 return tuples
-            filtered_output_data = self.predicate(tuples[1])
+            filtered_data = self.predicate(tuples[1])
+            if(filtered_data != None and filtered_data != []):
+                for element in filtered_data:
+                    element.operator = self
+                    self.input_to_output_mapping[element] = element
+                    processed_tuples.append(element)
         if(tuples[1] is None):
             return [tuples[0], None]
         else:
-            return [tuples[0], filtered_output_data]
+            return [tuples[0], processed_tuples]
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
+        processed_tuples = []
         if(self.predicate is None):
             return tuples
         if(tuples[1] is not None):
-            filtered_output_data = self.predicate(tuples[1])
-            tuples[1] = filtered_output_data.copy()
-            self.outputs[0].apply(tuples)
+            filtered_data = self.predicate(tuples[1])
+            if(filtered_data != None and filtered_data != []):
+                for element in filtered_data:
+                    element.operator = self
+                    self.input_to_output_mapping[element] = element
+                    processed_tuples.append(element)
+            self.outputs[0].apply([tuples[0], processed_tuples, tuples[2]])
             return
         else:
             self.outputs[0].apply([tuples[0], None])
+
 
 
 # Sink operator
@@ -1044,6 +1082,9 @@ if __name__ == "__main__":
         parser.add_argument("--"+argument)
 
     args = parser.parse_args()
+
+    # --lineage [int] --where-row [int] --where-attribute [int] --how [int] --responsibility [int]
+    lineage = input("Enter tuple ID to get lineage: ")
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
