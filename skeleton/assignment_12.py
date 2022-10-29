@@ -3,8 +3,6 @@ from __future__ import annotations
 from __future__ import division
 from __future__ import print_function
 import argparse
-from ast import alias
-from audioop import reverse
 import collections
 
 import csv
@@ -13,8 +11,8 @@ import logging
 from enum import Enum
 from statistics import mean
 from typing import List, Tuple
-from unittest import case
 import uuid
+
 
 # Note (john): Make sure you use Python's logger to log
 #              information about your program
@@ -40,21 +38,21 @@ class ATuple:
         metadata (string): The tuple metadata (e.g. provenance annotations).
         operator (Operator): A handle to the operator that produced the tuple.
     """
-    def __init__(self, tuple, metadata=None, operator=None):
+    def __init__(self, tuple, metadata=None, operator=None, tuple_identifier=None):
         self.tuple = tuple
         self.metadata = metadata
         self.operator = operator
-        self.tuple_identifier = _generate_uuid()
+        if tuple_identifier is None:
+            self.tuple_identifier = _generate_uuid()
+        else:
+            self.tuple_identifier = tuple_identifier
     
-    def __hash__(self):
-        return int(self.tuple_identifier)
-
     # Returns the lineage of self
     def lineage(self) -> List[ATuple]:
-        self.operator.lineage(tuples=[self])
-    
-    def __eq__(self, other):
-        return (self.tuple, self.metadata, self.operator) == (other.tuple, other.metadata, other.operator)
+        return self.operator.lineage(tuples=[self])
+
+    def __hash__(self):
+        return int(self.tuple_identifier)
 
     # Returns the Where-provenance of the attribute at index 'att_index' of self
     def where(self, att_index) -> List[Tuple]:
@@ -63,8 +61,7 @@ class ATuple:
 
     # Returns the How-provenance of self
     def how(self) -> str:
-        # YOUR CODE HERE (ONLY FOR TASK 3 IN ASSIGNMENT 2)
-        pass
+        return self.metadata(tuples=[self])
 
     # Returns the input tuples with responsibility \rho >= 0.5 (if any)
     def responsible_inputs(self) -> List[Tuple]:
@@ -103,7 +100,7 @@ class Operator:
         self.partition_strategy = partition_strategy
         
         # Dictionary to track input to output mapping
-        self.input_to_output_mapping = collections.defaultdict(List)
+        self.input_to_output_mapping = collections.defaultdict(list)
 
         logger.debug("Created {} operator with id {}".format(self.name,
                                                              self.id))
@@ -123,6 +120,7 @@ class Operator:
     # NOTE (john): Must be implemented by the subclasses
     def apply(self, tuples: List[ATuple]) -> bool:
         logger.error("Apply method is not implemented!")
+
 
 
 # Scan operator
@@ -155,7 +153,7 @@ class Scan(Operator):
                  propagate_prov=False,
                  pull=True,
                  partition_strategy : PartitionStrategy = PartitionStrategy.RR,
-                 batch_size=1000000,
+                 batch_size=100000,
                  relation_tag="L"):
         super(Scan, self).__init__(name="Scan",
                                    track_prov=track_prov,
@@ -167,6 +165,9 @@ class Scan(Operator):
         self.outputs = outputs
         self.filter = filter
         self.batch_size = batch_size
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
+
         self.scan_pointer = 1
 
         self.relation_tag = relation_tag
@@ -183,10 +184,18 @@ class Scan(Operator):
         with open(self.filepath) as input_file:
             for idx, row in enumerate(input_file):
                 if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size):
-                    processed_tuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
-                    self.input_to_output_mapping[processed_tuple] = processed_tuple
-                    output_data.append(processed_tuple)
-
+                    processed_ATuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
+                    output_data.append(processed_ATuple)
+                    
+                    if(self.track_prov):
+                        self.input_to_output_mapping[processed_ATuple] = processed_ATuple
+                    
+                    if(self.propagate_prov):
+                        if(self.relation_tag == "L"):
+                            processed_ATuple.metadata = "f"+str(idx)
+                        if(self.relation_tag == "R"):
+                            processed_ATuple.metadata = "r"+str(idx)
+                    
         self.scan_pointer += self.batch_size
         
         if(output_data != []):
@@ -198,8 +207,10 @@ class Scan(Operator):
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            temp_lineage += [self.input_to_output_mapping[element]]
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -214,15 +225,22 @@ class Scan(Operator):
             with open(self.filepath) as input_file:
                 for idx, row in enumerate(input_file):
                     if idx in range(self.scan_pointer, self.scan_pointer + self.batch_size):
-                        processed_tuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
-                        self.input_to_output_mapping[processed_tuple] = processed_tuple
-                        output_data.append(processed_tuple)
+                        processed_ATuple = ATuple(tuple=tuple(map(int, row.split(" "))), metadata=None, operator=self)
+                        output_data.append(processed_ATuple)
+
+                        if(self.track_prov):
+                            self.input_to_output_mapping[processed_ATuple] = processed_ATuple
+
+                        if(self.propagate_prov):
+                            if(self.relation_tag == "L"):
+                                processed_ATuple.metadata = "f"+str(idx)
+                            if(self.relation_tag == "R"):
+                                processed_ATuple.metadata = "r"+str(idx)
 
             self.scan_pointer += self.batch_size
 
             annotated_data = [self.column_headers, output_data, self.relation_tag] # the list contains information about the column headers in all the relations and information about the source of a relation (Left / Right)
 
-            print(output_data)
             if(output_data != []):
                 self.outputs[0].apply(annotated_data)
             else:
@@ -275,6 +293,8 @@ class Join(Operator):
         self.left_join_attribute = left_join_attribute
         self.right_join_attribute = right_join_attribute
         self.outputs = outputs
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
         self.left_relation_hash = collections.defaultdict(list)
         self.right_relation_hash = collections.defaultdict(list)
@@ -298,6 +318,9 @@ class Join(Operator):
                         # Collect the left relation into a dictionary (hashing) only on the first call
                         for atup_left in tuples[1]:
                             self.left_relation_hash[str(atup_left.tuple[self.left_join_attribute])].append(atup_left)
+
+                            if(self.propagate_prov):
+                                atup_left.metadata = "("+atup_left.metadata
                     else:
                         self.column_headers += tuples[0]
                         break
@@ -315,7 +338,16 @@ class Join(Operator):
                 matching_key = self.left_relation_hash[str(atup_right.tuple[self.right_join_attribute])]
                 if(matching_key != []):
                     for element in matching_key:
-                        output_from_probing.append(ATuple((element.tuple, atup_right.tuple,)))
+                        processed_tuple = (element.tuple, atup_right.tuple,)
+                        processed_ATuple = ATuple(tuple=processed_tuple, operator=self)
+                        output_from_probing.append(processed_ATuple)
+                        
+                        if(self.track_prov):
+                            self.input_to_output_mapping[processed_ATuple].append(element)
+                            self.input_to_output_mapping[processed_ATuple].append(atup_right)
+                        
+                        if(self.propagate_prov):
+                            processed_ATuple.metadata = element.metadata+"*"+atup_right.metadata+")"
 
         if(tuples[1] is None):
             annotated_output = [self.column_headers, None]
@@ -326,8 +358,11 @@ class Join(Operator):
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            temp_lineage += self.input_to_output_mapping[element][0].lineage()
+            temp_lineage += self.input_to_output_mapping[element][1].lineage()
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -347,11 +382,21 @@ class Join(Operator):
                     self.is_first_call_left = False
                 for tup in tuples[1]:
                     probing_key = str(tup.tuple[self.left_join_attribute])
-                    if(probing_key in self.right_relation_hash.keys()):
+                    if(self.right_relation_hash.get(probing_key) is not None):
                         matching_key = self.right_relation_hash[probing_key]
                         if(matching_key != []):
                             for element in matching_key:
-                                output_from_probing.append(ATuple((element.tuple, tup.tuple,)))
+                                processed_tuple = (element.tuple, tup.tuple,)
+                                processed_ATuple = ATuple(tuple=processed_tuple, operator=self)
+                                output_from_probing.append(processed_ATuple)
+
+                                if(self.track_prov):
+                                    self.input_to_output_mapping[processed_ATuple].append(element)
+                                    self.input_to_output_mapping[processed_ATuple].append(tup)
+                                
+                                if(self.propagate_prov):
+                                    processed_ATuple.metadata = "("+element.metadata +"*"+ tup.metadata+")"
+    
                     self.left_relation_hash[str(tup.tuple[self.left_join_attribute])].append(tup)
 
             if(tuples[2] == "R"):
@@ -360,11 +405,21 @@ class Join(Operator):
                     self.is_first_call_right = False
                 for tup in tuples[1]:
                     probing_key = str(tup.tuple[self.right_join_attribute])
-                    if(probing_key in self.left_relation_hash.keys()):
+                    if(self.left_relation_hash.get(probing_key) is not None):
                         matching_key = self.left_relation_hash[probing_key]
                         if(matching_key != []):
                             for element in matching_key:
-                                output_from_probing.append(ATuple((element.tuple, tup.tuple,)))
+                                processed_tuple = (element.tuple, tup.tuple,)
+                                processed_ATuple = ATuple(tuple=processed_tuple, operator=self)
+                                output_from_probing.append(processed_ATuple)
+
+                                if(self.track_prov):
+                                    self.input_to_output_mapping[processed_ATuple].append(element)
+                                    self.input_to_output_mapping[processed_ATuple].append(tup)
+
+                                if(self.propagate_prov):
+                                    processed_ATuple.metadata = "("+element.metadata +"*"+ tup.metadata+")"
+                                
                     self.right_relation_hash[str(tup.tuple[self.right_join_attribute])].append(tup)
 
             annotated_output = [self.column_headers, output_from_probing]
@@ -416,6 +471,8 @@ class Project(Operator):
         self.outputs = outputs
         self.fields_to_keep = fields_to_keep
         self.aliasing = aliasing
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
         self.column_headers = []
 
@@ -446,13 +503,28 @@ class Project(Operator):
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(flattened_tuple[index])
-                            projected_column.append(ATuple(tuple(temp,)))
-                    except:
-                        for element in tuples[1]: # For flat tuples
+                            processed_ATuple = ATuple(tuple=tuple(temp,), operator=self)
+                            projected_column.append(processed_ATuple)
+
+                            if(self.track_prov):
+                                self.input_to_output_mapping[processed_ATuple] = element
+                            
+                            if(self.propagate_prov):
+                                processed_ATuple.metadata = element.metadata
+
+                    except: # For flat tuples
+                        for element in tuples[1]: 
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(element.tuple[index])
-                            projected_column.append(ATuple(tuple(temp,)))
+                            processed_ATuple = ATuple(tuple=tuple(temp,), operator=self)
+                            projected_column.append(processed_ATuple)
+
+                            if(self.track_prov):
+                                self.input_to_output_mapping[processed_ATuple] = element
+                            
+                            if(self.propagate_prov):
+                                processed_ATuple.metadata = element.metadata
         
         if(tuples[1] is None): 
             return [self.fields_to_keep, None]
@@ -461,8 +533,10 @@ class Project(Operator):
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            temp_lineage += self.input_to_output_mapping[element].lineage()
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -494,13 +568,28 @@ class Project(Operator):
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(flattened_tuple[index])
-                            projected_column.append(ATuple(tuple(temp,)))
+                            processed_ATuple = ATuple(tuple=tuple(temp,), operator=self)
+                            projected_column.append(processed_ATuple)
+
+                            if(self.track_prov):    
+                                self.input_to_output_mapping[processed_ATuple] = element
+                            
+                            if(self.propagate_prov):
+                                processed_ATuple.metadata = element.metadata
+
                     except: # For flat tuples
                         for element in tuples[1]:
                             temp = []
                             for index in project_fields_to_index:
                                 temp.append(element.tuple[index])
-                            projected_column.append(ATuple(tuple(temp,)))
+                            processed_ATuple = ATuple(tuple=tuple(temp,), operator=self)
+                            projected_column.append(processed_ATuple)
+
+                            if(self.track_prov):
+                                self.input_to_output_mapping[processed_ATuple] = element
+                            
+                            if(self.propagate_prov):
+                                processed_ATuple.metadata = element.metadata
                             
                     annotated_output = [self.fields_to_keep, projected_column]
                     self.outputs[0].apply(annotated_output)
@@ -554,9 +643,13 @@ class GroupBy(Operator):
         self.agg_fun = agg_fun
         self.key = key
         self.value = value
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
         self.column_headers = []
         self.grouping_dict = collections.defaultdict(list)
+        self.intermediate_mapping = collections.defaultdict(list)
+        self.metadata_dict = collections.defaultdict(str)
         self.is_first_none = True
 
     # Returns aggregated value per distinct key in the input (or None if done)
@@ -574,18 +667,31 @@ class GroupBy(Operator):
                     else:
                         self.grouping_dict[str(item.tuple[self.key])].append(int(item.tuple[self.value]))
 
+                        if(self.track_prov):
+                            self.intermediate_mapping[str(item.tuple[self.key])].append(item)
+                        
+                        if(self.propagate_prov):
+                            self.metadata_dict[str(item.tuple[self.key])] += item.metadata[:-1] + "@" + str((item.tuple[self.value])) +"), "
+
             if(self.key == 0 and self.value == 0):
                 if(tuples[1] != [None]):
-                    output_data += [
-                            ATuple(
-                                (self.agg_fun(self.grouping_dict[str(self.key)]),)
-                                )
-                            ]
+                    processed_ATuple = ATuple(
+                                tuple=(self.agg_fun(self.grouping_dict[str(self.key)]),),
+                                operator=self)
+                    output_data += [processed_ATuple]
+                    
             else:
                 for dict_item in enumerate(self.grouping_dict.items()):
                     output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
-                    output_data.append(ATuple((int(dict_item[1][self.key]), output_dict[dict_item[1][self.key]])))
-        
+                    processed_ATuple = ATuple(tuple=(int(dict_item[1][self.key]), output_dict[dict_item[1][self.key]]), operator=self)
+                    output_data.append(processed_ATuple)
+
+                    if(self.track_prov):
+                        self.input_to_output_mapping[processed_ATuple] += self.intermediate_mapping[str(dict_item[1][self.key])]
+                    
+                    if(self.propagate_prov):
+                        processed_ATuple.metadata = "AVG( "+self.metadata_dict[dict_item[1][self.key]][:-2]+" )"
+
         annotated_output = [tuples[0], output_data]
 
         if(tuples[1] is None): 
@@ -593,8 +699,12 @@ class GroupBy(Operator):
             
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            element_iter = self.input_to_output_mapping[element]
+            for subelement in element_iter:
+                temp_lineage += subelement.lineage()
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -613,6 +723,12 @@ class GroupBy(Operator):
                         self.grouping_dict[str(self.key)].append(int(item.tuple[self.value]))
                     else:
                         self.grouping_dict[str(item.tuple[self.key])].append(int(item.tuple[self.value]))
+
+                        if(self.track_prov):
+                            self.intermediate_mapping[str(item.tuple[self.key])].append(item)
+                        
+                        if(self.propagate_prov):
+                            self.metadata_dict[str(item.tuple[self.key])] += item.metadata[:-1] + "@" + str((item.tuple[self.value])) +"), "
             else:
                 return
         else:
@@ -623,18 +739,28 @@ class GroupBy(Operator):
                 output_dict = {}
                 if(self.key == 0 and self.value == 0):
                     try:
-                        output_data += [
-                            ATuple(
-                                (self.agg_fun(self.grouping_dict[str(self.key)]),)
+                        processed_ATuple = ATuple(
+                                (self.agg_fun(self.grouping_dict[str(self.key)]),),
+                                operator=self
                                 )
-                            ]
+                        output_data += [processed_ATuple]
                     except:
                         if(self.outputs != []):
                             self.outputs[0].apply([self.column_headers, None])
                 else:
                     for dict_item in enumerate(self.grouping_dict.items()):
                         output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
-                        output_data.append(ATuple((int(dict_item[1][self.key]), output_dict[dict_item[1][self.key]])))
+                        processed_ATuple = ATuple(
+                            tuple=(int(dict_item[1][self.key]), output_dict[dict_item[1][self.key]]), 
+                            operator=self
+                            )
+                        output_data.append(processed_ATuple)
+
+                        if(self.track_prov):
+                            self.input_to_output_mapping[processed_ATuple] += self.intermediate_mapping[str(dict_item[1][self.key])]
+                        
+                        if(self.propagate_prov):
+                            processed_ATuple.metadata = "AVG( "+self.metadata_dict[dict_item[1][self.key]][:-2]+" )"
 
                 annotated_output = [self.column_headers, output_data]
                 if(self.outputs != []):
@@ -768,11 +894,15 @@ class OrderBy(Operator):
         self.outputs = outputs
         self.comparator = comparator
         self.ASC = ASC
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
         self.collected_data = []
 
     # Returns the sorted input (or None if done)
     def get_next(self):
+        intermediate_mapping = collections.defaultdict(list)
+        metadata_mapping = collections.defaultdict(str)
         for operator in self.inputs:
             if(operator.name in ["Scan"]):
                 while(True):
@@ -784,25 +914,46 @@ class OrderBy(Operator):
                 tuples = operator.get_next()
                 self.collected_data = tuples[1]
 
-            tuple_list = [value.tuple for value in self.collected_data]
+            tuple_list = []
+            for element in self.collected_data:
+                temp_tuple = element.tuple
+                tuple_list.append(temp_tuple)
+
+                if(self.track_prov):
+                    intermediate_mapping[temp_tuple].append(element)
+                
+                if(self.propagate_prov):
+                    metadata_mapping[temp_tuple] = element.metadata
+
             if(self.ASC):
                 reversed = False
             else:
                 reversed = True
             # Sort list by the first element
             sorted_list = self.comparator(tuple_list, key=lambda x:x[1], reverse=reversed)
-            output_data = [ATuple(item) for item in sorted_list]
+            output_data = []
+            for element in sorted_list:
+                processed_ATuple = ATuple(tuple=element, operator=self)
+                output_data.append(processed_ATuple)
+
+                if(self.track_prov):
+                    self.input_to_output_mapping[processed_ATuple] = intermediate_mapping[element]
+                
+                if(self.propagate_prov):
+                    processed_ATuple.metadata = metadata_mapping[element]
 
         annotated_output = [tuples[0], output_data]
 
         return annotated_output
             
-
-
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            element_iter = self.input_to_output_mapping[element]
+            for subelement in element_iter:
+                temp_lineage += subelement.lineage()
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -812,23 +963,42 @@ class OrderBy(Operator):
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
-        # while(True):
-        #     print(tuples[1])
-        #     if(tuples[1] is None):
-        #         break
-        #     self.collected_data += tuples[1]
+        intermediate_mapping = collections.defaultdict(list)
+        metadata_mapping = collections.defaultdict(str)
 
         self.collected_data = tuples[1]
 
-        tuple_list = [value.tuple for value in self.collected_data]
+        tuple_list = []
+        for element in self.collected_data:
+            temp_tuple = element.tuple
+            tuple_list.append(temp_tuple)
+
+            if(self.track_prov):
+                intermediate_mapping[temp_tuple].append(element)
+            
+            if(self.propagate_prov):
+                metadata_mapping[temp_tuple] = element.metadata
+            
+
         if(self.ASC):
             reversed = False
         else:
             reversed = True
         # Sort list by the second element
         sorted_list = self.comparator(tuple_list, key=lambda x:x[1], reverse=reversed)
-        output_data = [ATuple(item) for item in sorted_list]
+        output_data = []
+        for element in sorted_list:
+            processed_ATuple = ATuple(tuple=element, operator=self)
+            output_data.append(processed_ATuple)
+
+            if(self.track_prov):
+                self.input_to_output_mapping[processed_ATuple] = intermediate_mapping[element]
+            
+            if(self.propagate_prov):
+                processed_ATuple.metadata = metadata_mapping[element]
+
         annotated_output = [tuples[0], output_data]
+
         if(self.outputs != []):
             self.outputs[0].apply(annotated_output)
 
@@ -871,6 +1041,8 @@ class TopK(Operator):
         self.inputs = inputs
         self.outputs = outputs
         self.k = k
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
         self.output_data = []
 
@@ -890,16 +1062,22 @@ class TopK(Operator):
                     self.output_data = tuples[1][0:self.k]
                 except:
                     self.output_data = tuples[1]
+                
+                if(self.track_prov):
+                    for element in self.output_data:
+                        self.input_to_output_mapping[element] = element
 
             annotated_output = [tuples[0], self.output_data]
 
             return annotated_output
-                
+
 
     # Returns the lineage of the given tuples
     def lineage(self, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 1 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            temp_lineage += self.input_to_output_mapping[element].lineage()
+        return temp_lineage
 
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
@@ -911,7 +1089,12 @@ class TopK(Operator):
     # (TODO) Make TopK non-blocking by using k in while loop.
     def apply(self, tuples: List[ATuple]): 
         if(self.outputs != []):
-            annotated_output = [tuples[0], tuples[1][0:self.k]]
+            self.output_data = tuples[1][0:self.k]
+            if(self.track_prov):
+                for element in self.output_data:
+                    self.input_to_output_mapping[element] = element
+
+            annotated_output = [tuples[0], self.output_data]
             self.outputs[0].apply(annotated_output)
 
 
@@ -952,6 +1135,8 @@ class Select(Operator):
         self.inputs = inputs
         self.outputs = outputs
         self.predicate = predicate
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
@@ -963,8 +1148,6 @@ class Select(Operator):
             filtered_data = self.predicate(tuples[1])
             if(filtered_data != None and filtered_data != []):
                 for element in filtered_data:
-                    element.operator = self
-                    self.input_to_output_mapping[element] = element
                     processed_tuples.append(element)
         if(tuples[1] is None):
             return [tuples[0], None]
@@ -980,8 +1163,6 @@ class Select(Operator):
             filtered_data = self.predicate(tuples[1])
             if(filtered_data != None and filtered_data != []):
                 for element in filtered_data:
-                    element.operator = self
-                    self.input_to_output_mapping[element] = element
                     processed_tuples.append(element)
             self.outputs[0].apply([tuples[0], processed_tuples, tuples[2]])
             return
@@ -1024,8 +1205,10 @@ class Sink(Operator):
                                      partition_strategy=partition_strategy)
         self.inputs = inputs
         self.filepath = filepath
+        self.track_prov = track_prov
+        self.propagate_prov = propagate_prov
 
-        self.output_data = [] # make sink blocking
+        self.output_data = [] # stores the final output of the query
 
     # Returns next batch of tuples that pass the filter (or None if done)
     def get_next(self):
@@ -1034,17 +1217,20 @@ class Sink(Operator):
             self.output_data = tuples[1]
 
             annotated_output = [tuples[0], self.output_data]
-            self.write_to_csv(annotated_output)
-        
+
+            if(not self.track_prov and not self.propagate_prov):
+                self.write_to_csv(annotated_output)
+            
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
         if(tuples[1] != [] and tuples[1] is not None):
             self.output_data += tuples[1]
-        # else:
-        annotated_output = [tuples[0], self.output_data]
-        self.write_to_csv(annotated_output)
 
-    
+        annotated_output = [tuples[0], self.output_data]
+
+        if(not self.track_prov and not self.propagate_prov):
+            self.write_to_csv(annotated_output)
+
     # Writes the tuples to the CSV file with column headers
     def write_to_csv(self, tuples):
         with open(self.filepath, 'w') as output_file:
@@ -1052,6 +1238,27 @@ class Sink(Operator):
             output_writer.writerow(tuples[0]) # Write column headers
             for item in tuples[1]:
                 output_writer.writerow(item.tuple)
+    
+    # Collects and writes the lineage of the specified tuples
+    def write_lineage(self, tuple_index):
+        temp = self.output_data[tuple_index].lineage()
+        write_to_file = []
+        for item in temp:
+            write_to_file.append(item.tuple)
+        if(self.filepath != ""):
+            with open(self.filepath, 'w') as lineage_output_file:
+                lineage_output_file.write(str(write_to_file))
+        
+        return temp
+    
+    def write_how_provenance(self, tuple_index):
+        write_to_file = self.output_data[tuple_index].metadata
+        
+        if(self.filepath != ""):
+            with open(self.filepath, 'w') as lineage_output_file:
+                lineage_output_file.write(str(write_to_file))
+        
+        return write_to_file
 
 
 
@@ -1076,15 +1283,32 @@ if __name__ == "__main__":
     # Initialize parser
     parser = argparse.ArgumentParser()
 
-    options_list = ["query", "ff", "mf", "uid", "mid", "pull", "output"]
+    options_list = ["query", "ff", "mf", "uid", "mid", "pull", "output", "lineage", "where-row", "where-attribute", "how", "responsibility"]
 
     for argument in options_list:
         parser.add_argument("--"+argument)
 
     args = parser.parse_args()
 
+    movie_id = int(args.mid)
+    user_id = int(args.uid)
+
+    relation_1 = args.ff
+    relation_2 = args.mf
+
     # --lineage [int] --where-row [int] --where-attribute [int] --how [int] --responsibility [int]
-    lineage = input("Enter tuple ID to get lineage: ")
+    lineage_tuple_index = int(args.lineage)
+    how_tuple_index = int(args.how)
+
+    if(args.lineage == "-1"):
+        track_prov = False
+    else:
+        track_prov = True
+    
+    if(args.how == "-1"):
+        propagate_prov = False
+    else:
+        propagate_prov = True
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
@@ -1093,12 +1317,6 @@ if __name__ == "__main__":
     # WHERE F.UID2 = R.UID
     #       AND F.UID1 = 'A'
     #       AND R.MID = 'M'
-
-    movie_id = int(args.mid)
-    user_id = int(args.uid)
-
-    relation_1 = args.ff
-    relation_2 = args.mf
 
     if(args.query == "1"):
         if(args.pull == "1"):
@@ -1119,7 +1337,7 @@ if __name__ == "__main__":
 
             sink_operator = Sink(inputs=[average_operator], filepath=args.output)
             sink_operator.get_next()
-
+                    
         else:
             ## -------------------------
             ## Push-based
@@ -1127,7 +1345,6 @@ if __name__ == "__main__":
             sink_operator = Sink(inputs=[], filepath=args.output)
 
             average_operator = GroupBy(inputs=[], outputs=[sink_operator], agg_fun=mean, key=0, value=0) # key and value are attribute numbers after projection
-            # key = -1 means only 1 column was projected
 
             project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["Rating"])
 
@@ -1155,57 +1372,81 @@ if __name__ == "__main__":
     #        ORDER BY score DESC
     #        LIMIT 1 )
 
+    def pull_recommendation(track_prov, propagate_prov):
+        scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
+        scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
+
+        filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[scan_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov = propagate_prov)
+
+        groupby_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        orderby_operator = OrderBy(inputs=[groupby_operator], outputs=[], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        limit_operator = TopK(inputs=[orderby_operator], outputs=[], k=1, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        project_operator = Project(inputs=[limit_operator], outputs=[], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        sink_operator = Sink(inputs=[project_operator], filepath=args.output, track_prov=track_prov, propagate_prov = propagate_prov)
+        sink_operator.get_next()
+
+        temp = None
+
+        if(track_prov):
+            temp = sink_operator.write_lineage(lineage_tuple_index)
+
+        if(propagate_prov):
+            temp = sink_operator.write_how_provenance(how_tuple_index)
+        
+        return temp
+
+    def push_recommendation(track_prov, propagate_prov):
+        sink_operator = Sink(inputs=[], filepath=args.output, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        project_operator = Project(inputs=[], outputs=[sink_operator], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        limit_operator = TopK(inputs=[], outputs=[project_operator], k=1, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        orderby_operator = OrderBy(inputs=[], outputs=[limit_operator], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        groupby_operator = GroupBy(inputs=[], outputs=[orderby_operator], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov = propagate_prov) # key and value are attribute numbers after projection
+
+        project_operator = Project(inputs=[], outputs=[groupby_operator], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov = propagate_prov)
+
+        join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov = propagate_prov)
+
+        filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left, track_prov=track_prov, propagate_prov = propagate_prov) 
+
+        scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
+        scan_operator_right = Scan(filepath=relation_2, outputs=[join_operator], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
+
+        scan_operator_left.start()
+        scan_operator_right.start()
+        
+        temp = None
+
+        if(track_prov):
+            temp = sink_operator.write_lineage(lineage_tuple_index)
+
+        if(propagate_prov):
+            temp = sink_operator.write_how_provenance(how_tuple_index)
+        
+        return temp
+
     if(args.query == "2"):
         if(args.pull == "1"):
             ## -------------------------
             ## Pull-based
             ## -------------------------
-            scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L")
-            scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R")
-
-            filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
-
-            join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[scan_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
-
-            project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["MID", "Rating"])
-
-            groupby_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=1)
-
-            orderby_operator = OrderBy(inputs=[groupby_operator], outputs=[], comparator=sorted, ASC=False)
-
-            limit_operator = TopK(inputs=[orderby_operator], outputs=[], k=1)
-
-            project_operator = Project(inputs=[limit_operator], outputs=[], fields_to_keep=["MID"], aliasing=False)
-
-            sink_operator = Sink(inputs=[orderby_operator], filepath=args.output)
-            sink_operator.get_next()
+            pull_recommendation(track_prov, propagate_prov)
         else:
             ## -------------------------
             ## Push-based
             ## -------------------------
-            sink_operator = Sink(inputs=[], filepath=args.output)
-
-            project_operator = Project(inputs=[], outputs=[sink_operator], fields_to_keep=["MID"], aliasing=False)
-
-            limit_operator = TopK(inputs=[], outputs=[project_operator], k=1)
-
-            orderby_operator = OrderBy(inputs=[], outputs=[limit_operator], comparator=sorted, ASC=False)
-
-            groupby_operator = GroupBy(inputs=[], outputs=[orderby_operator], agg_fun=mean, key=0, value=1) # key and value are attribute numbers after projection
-            # key = -1 means only 1 column was projected
-
-            project_operator = Project(inputs=[], outputs=[groupby_operator], fields_to_keep=["MID", "Rating"])
-
-            join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
-
-            filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left) 
-
-            scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L")
-            scan_operator_right = Scan(filepath=relation_2, outputs=[join_operator], relation_tag="R")
-
-            scan_operator_left.start()
-            scan_operator_right.start()
-
+            push_recommendation(track_prov, propagate_prov)
 
     # TASK 3: Implement explanation query for User A and Movie M
     #
@@ -1242,7 +1483,6 @@ if __name__ == "__main__":
             project_operator = Project(inputs=[], outputs=[sink_operator], fields_to_keep=["Rating", "Count"], aliasing=True)
 
             histogram_operator = Histogram(inputs=[], outputs=[project_operator], key=0) # key is the attribute index after projection
-            # key = -1 means only 1 column was projected
 
             project_operator = Project(inputs=[], outputs=[histogram_operator], fields_to_keep=["Rating"])
 
@@ -1269,7 +1509,7 @@ if __name__ == "__main__":
 
     # YOUR CODE HERE
 
-
+    
     # TASK 2: Implement where-provenance query for 'likeness' prediction
 
     # YOUR CODE HERE
@@ -1278,7 +1518,7 @@ if __name__ == "__main__":
     # TASK 3: Implement how-provenance query for movie recommendation
 
     # YOUR CODE HERE
-
+    
 
     # TASK 4: Retrieve most responsible tuples for movie recommendation
 
