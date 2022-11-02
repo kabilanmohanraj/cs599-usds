@@ -6,9 +6,12 @@ import argparse
 import collections
 
 import csv
+from decimal import DivisionByZero
 from email import header
 import logging
 from enum import Enum
+from operator import itemgetter
+import re
 from statistics import mean
 from typing import List, Tuple
 import uuid
@@ -61,12 +64,107 @@ class ATuple:
 
     # Returns the How-provenance of self
     def how(self) -> str:
-        return self.metadata(tuples=[self])
+        return self.metadata
 
     # Returns the input tuples with responsibility \rho >= 0.5 (if any)
     def responsible_inputs(self) -> List[Tuple]:
-        # YOUR CODE HERE (ONLY FOR TASK 4 IN ASSIGNMENT 2)
-        pass
+        temp_dict = GroupBy.how_provenance_dict
+        extracted_tuple_strings = []
+        output_tuples = temp_dict.keys()
+        for element in temp_dict.values():
+            temp_string = re.sub(r"([A-Z(),])", "", element)
+            temp_string = temp_string.strip().split(" ")
+            extracted_tuple_strings.append(temp_string)
+
+        string_to_tuples = [] # Nested list
+        flat_tuples = [] # Flat list
+        for element in extracted_tuple_strings:
+            temp_2 = []
+            for subelement in element:
+                temp = []
+                temp_1 = []
+                temp = re.split('@|\*', subelement)
+                temp_1.append(Scan.how_identifier_to_tuple_map[temp[0]])
+                temp_1.append(Scan.how_identifier_to_tuple_map[temp[1]])
+                flat_tuples += temp_1
+                temp_1.append(int(temp[2]))
+                temp_2.append(temp_1)
+            string_to_tuples.append(temp_2)
+        
+        counterfactual_causes = set()
+        actual_causes = set()
+
+        def recalculate_agg_value(ignore_tuples):
+            agg_value_list = []
+            for element in string_to_tuples:
+                element_count = 0
+                element_sum = 0
+                for subelement in element:
+                    if(isinstance(ignore_tuples, ATuple)):
+                        if(ignore_tuples in subelement):
+                            continue
+                    if(isinstance(ignore_tuples, list)):
+                        if(ignore_tuples[0] in subelement or ignore_tuples[1] in subelement):
+                            continue
+                    element_sum += subelement[2]
+                    element_count += 1
+
+                try:
+                    agg_value_list.append(element_sum/element_count)
+                except ZeroDivisionError:
+                    agg_value_list.append(0)
+
+            return agg_value_list
+
+        original_agg_values = list(map(itemgetter(1), list(output_tuples)))
+        original_topk_agg_value = max(original_agg_values)
+        original_topk_indices = set()
+        new_agg_values = []
+
+        i = 0
+        while(i < len(original_agg_values)):
+            if(original_agg_values[i] == original_topk_agg_value):
+                original_topk_indices.add(i)
+            i += 1
+
+        # Finding counterfactual causes
+        i = 0
+        while(i < len(flat_tuples)):
+            new_agg_values = recalculate_agg_value(flat_tuples[i])
+            new_topk_agg_value = max(new_agg_values)
+            new_topk_indices = set()
+            j = 0
+            while(j < len(new_agg_values)):
+                if(new_agg_values[j] == new_topk_agg_value):
+                    new_topk_indices.add(j)
+                j += 1
+            if(not original_topk_indices.issubset(new_topk_indices)):
+                counterfactual_causes.add((flat_tuples[i].tuple, 1,))
+            i += 1
+
+        # Finding actual causes
+        i = 0
+        while(i < len(flat_tuples)):
+            j = 0
+            while(j < len(flat_tuples)):
+                if(flat_tuples[i].tuple not in counterfactual_causes and flat_tuples[j].tuple not in counterfactual_causes):
+                    new_agg_values = recalculate_agg_value([flat_tuples[i], flat_tuples[j]])
+                    new_topk_agg_value = max(new_agg_values)
+                    new_topk_indices = set()
+                    k = 0
+                    while(k < len(new_agg_values)):
+                        if(new_agg_values[k] == new_topk_agg_value):
+                            new_topk_indices.add(k)
+                        k += 1
+                    if(not original_topk_indices.issubset(new_topk_indices)):
+                        actual_causes.add((flat_tuples[i].tuple, 0.5,))
+                j += 1
+            i += 1
+
+        tuples_rho_geq_0_5 = set()
+        tuples_rho_geq_0_5 = tuples_rho_geq_0_5.union(counterfactual_causes)
+        tuples_rho_geq_0_5 = tuples_rho_geq_0_5.union(actual_causes)
+        return list(tuples_rho_geq_0_5)
 
 
 # Data operator
@@ -141,8 +239,8 @@ class Scan(Operator):
         partition_strategy (Enum): Defines the output partitioning
         strategy.
     """
-    scan_operator_number = 0 # The variable is used in the indexing scheme for the attributes
-    column_headers_to_index = {} # Mapping attributes to numbers
+
+    how_identifier_to_tuple_map = {}
 
     # Initializes scan operator
     def __init__(self,
@@ -195,7 +293,8 @@ class Scan(Operator):
                             processed_ATuple.metadata = "f"+str(idx)
                         if(self.relation_tag == "R"):
                             processed_ATuple.metadata = "r"+str(idx)
-                    
+                        Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
+                
         self.scan_pointer += self.batch_size
         
         if(output_data != []):
@@ -236,6 +335,7 @@ class Scan(Operator):
                                 processed_ATuple.metadata = "f"+str(idx)
                             if(self.relation_tag == "R"):
                                 processed_ATuple.metadata = "r"+str(idx)
+                            Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
 
             self.scan_pointer += self.batch_size
 
@@ -545,7 +645,7 @@ class Project(Operator):
         pass
 
     # Applies the operator logic to the given list of tuples
-    def apply(self, tuples: List[ATuple]): # add column_headers_to_index in the function call from join
+    def apply(self, tuples: List[ATuple]):
         if(self.aliasing):
             annotated_output = [self.fields_to_keep, tuples[1]]
             self.outputs[0].apply(annotated_output)
@@ -621,6 +721,9 @@ class GroupBy(Operator):
         partition_strategy (Enum): Defines the output partitioning
         strategy.
     """
+
+    how_provenance_dict = {}
+
     # Initializes average operator
     def __init__(self,
                  inputs : List[Operator],
@@ -691,6 +794,8 @@ class GroupBy(Operator):
                     
                     if(self.propagate_prov):
                         processed_ATuple.metadata = "AVG( "+self.metadata_dict[dict_item[1][self.key]][:-2]+" )"
+        
+                        GroupBy.how_provenance_dict[processed_ATuple.tuple] = processed_ATuple.metadata
 
         annotated_output = [tuples[0], output_data]
 
@@ -729,6 +834,7 @@ class GroupBy(Operator):
                         
                         if(self.propagate_prov):
                             self.metadata_dict[str(item.tuple[self.key])] += item.metadata[:-1] + "@" + str((item.tuple[self.value])) +"), "
+
             else:
                 return
         else:
@@ -761,6 +867,8 @@ class GroupBy(Operator):
                         
                         if(self.propagate_prov):
                             processed_ATuple.metadata = "AVG( "+self.metadata_dict[dict_item[1][self.key]][:-2]+" )"
+
+                            GroupBy.how_provenance_dict[processed_ATuple.tuple] = processed_ATuple.metadata
 
                 annotated_output = [self.column_headers, output_data]
                 if(self.outputs != []):
@@ -941,7 +1049,7 @@ class OrderBy(Operator):
                 
                 if(self.propagate_prov):
                     processed_ATuple.metadata = metadata_mapping[element]
-
+        
         annotated_output = [tuples[0], output_data]
 
         return annotated_output
@@ -1239,28 +1347,33 @@ class Sink(Operator):
             for item in tuples[1]:
                 output_writer.writerow(item.tuple)
     
+    def write_to_txt(self, content):       
+        if(self.filepath != ""):
+            with open(self.filepath, 'w') as output_file:
+                output_file.write(str(content))
+
     # Collects and writes the lineage of the specified tuples
-    def write_lineage(self, tuple_index):
+    def get_lineage(self, tuple_index):
         temp = self.output_data[tuple_index].lineage()
         write_to_file = []
         for item in temp:
             write_to_file.append(item.tuple)
-        if(self.filepath != ""):
-            with open(self.filepath, 'w') as lineage_output_file:
-                lineage_output_file.write(str(write_to_file))
-        
+            self.write_to_txt(write_to_file)
         return temp
-    
-    def write_how_provenance(self, tuple_index):
-        write_to_file = self.output_data[tuple_index].metadata
-        
-        if(self.filepath != ""):
-            with open(self.filepath, 'w') as lineage_output_file:
-                lineage_output_file.write(str(write_to_file))
-        
+
+    # Collects and writes the how provenance of the specified tuples
+    def get_how_provenance(self, tuple_index):
+        write_to_file = self.output_data[tuple_index].how()
+        self.write_to_txt(write_to_file)
         return write_to_file
-
-
+    
+    # Collects and writes the responsibilities of the specified tuples
+    def get_responsibility(self, tuple_index):
+        self.get_how_provenance(tuple_index)
+        write_to_file = self.output_data[tuple_index].responsible_inputs()
+        self.write_to_txt(write_to_file)
+        return write_to_file
+        
 
 ## Filter functions to be passed to the "Select" operator           
 def relation_filter_left(scan_output_left):
@@ -1273,7 +1386,77 @@ def relation_filter_right(scan_output_right):
         filter_output_right = [value for value in scan_output_right if(value.tuple[1] == movie_id)]
         return filter_output_right
     
+def pull_recommendation(relation_1, relation_2, relation_filter, output_path, track_prov, propagate_prov, lineage_tuple_index, how_tuple_index, responsibility_tuple_index):
+    scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
+    scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
 
+    filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[scan_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov = propagate_prov)
+
+    groupby_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    orderby_operator = OrderBy(inputs=[groupby_operator], outputs=[], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    limit_operator = TopK(inputs=[orderby_operator], outputs=[], k=1, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    project_operator = Project(inputs=[limit_operator], outputs=[], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov = propagate_prov)
+
+    sink_operator = Sink(inputs=[project_operator], filepath=output_path, track_prov=track_prov, propagate_prov=propagate_prov)
+    sink_operator.get_next()
+
+    temp = None
+
+    if(track_prov):
+        temp = sink_operator.get_lineage(lineage_tuple_index)
+
+    if(propagate_prov):
+        temp = sink_operator.get_how_provenance(how_tuple_index)
+    
+    if(responsibility_tuple_index != -1):
+        temp = sink_operator.get_responsibility(responsibility_tuple_index)
+    
+    return temp
+
+def push_recommendation(relation_1, relation_2, relation_filter, output_path, track_prov, propagate_prov, lineage_tuple_index, how_tuple_index, responsibility_tuple_index):
+
+    sink_operator = Sink(inputs=[], filepath=output_path, track_prov=track_prov, propagate_prov=propagate_prov)
+
+    project_operator = Project(inputs=[], outputs=[sink_operator], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov=propagate_prov)
+
+    limit_operator = TopK(inputs=[], outputs=[project_operator], k=1, track_prov=track_prov, propagate_prov=propagate_prov)
+
+    orderby_operator = OrderBy(inputs=[], outputs=[limit_operator], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov=propagate_prov)
+
+    groupby_operator = GroupBy(inputs=[], outputs=[orderby_operator], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov=propagate_prov) # key and value are attribute numbers after projection
+
+    project_operator = Project(inputs=[], outputs=[groupby_operator], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov=propagate_prov)
+
+    join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov=propagate_prov)
+
+    filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter, track_prov=track_prov, propagate_prov=propagate_prov) 
+
+    scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L", track_prov=track_prov, propagate_prov=propagate_prov)
+    scan_operator_right = Scan(filepath=relation_2, outputs=[join_operator], relation_tag="R", track_prov=track_prov, propagate_prov=propagate_prov)
+
+    scan_operator_left.start()
+    scan_operator_right.start()
+    
+    temp = None
+
+    if(track_prov):
+        temp = sink_operator.get_lineage(lineage_tuple_index)
+
+    if(propagate_prov):
+        temp = sink_operator.get_how_provenance(how_tuple_index)
+    
+    if(responsibility_tuple_index != -1):
+        temp = sink_operator.get_responsibility(responsibility_tuple_index)
+    
+    return temp
+        
 
 ## Driver
 if __name__ == "__main__":
@@ -1286,7 +1469,10 @@ if __name__ == "__main__":
     options_list = ["query", "ff", "mf", "uid", "mid", "pull", "output", "lineage", "where-row", "where-attribute", "how", "responsibility"]
 
     for argument in options_list:
-        parser.add_argument("--"+argument)
+        if(argument in ["lineage", "where-row", "where-attribute", "how", "responsibility"]):
+            parser.add_argument("--"+argument, nargs='?', default=-1)
+        else:
+            parser.add_argument("--"+argument)
 
     args = parser.parse_args()
 
@@ -1297,18 +1483,30 @@ if __name__ == "__main__":
     relation_2 = args.mf
 
     # --lineage [int] --where-row [int] --where-attribute [int] --how [int] --responsibility [int]
-    lineage_tuple_index = int(args.lineage)
-    how_tuple_index = int(args.how)
 
-    if(args.lineage == "-1"):
+    track_prov = False
+    if(args.lineage == -1):
         track_prov = False
     else:
         track_prov = True
+    lineage_tuple_index = int(args.lineage)
     
-    if(args.how == "-1"):
+    where_row_index = int(args.where_row)  
+    where_attribute_index = int(args.where_attribute)
+    
+    propagate_prov = False
+    if(args.how == -1):
         propagate_prov = False
     else:
         propagate_prov = True
+    how_tuple_index = int(args.how)
+    
+    if(args.responsibility == -1):
+        responsibility_tuple_index = -1
+    else:
+        propagate_prov = True
+    how_tuple_index = int(args.responsibility)
+    responsibility_tuple_index = int(args.responsibility)
 
     # TASK 1: Implement 'likeness' prediction query for User A and Movie M
     #
@@ -1318,25 +1516,31 @@ if __name__ == "__main__":
     #       AND F.UID1 = 'A'
     #       AND R.MID = 'M'
 
+    def pull_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, output_path):
+        scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L")
+        scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R")
+
+        filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
+        filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
+
+        join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
+
+        project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
+
+        average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=0)
+
+        sink_operator = Sink(inputs=[average_operator], filepath=output_path)
+        sink_operator.get_next()
+        
+        return sink_operator.output_data
+
+
     if(args.query == "1"):
         if(args.pull == "1"):
             ## -------------------------
             ## Pull-based
             ## -------------------------
-            scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L")
-            scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R")
-
-            filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
-            filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
-
-            join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
-
-            project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
-
-            average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=0)
-
-            sink_operator = Sink(inputs=[average_operator], filepath=args.output)
-            sink_operator.get_next()
+            pull_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output)
                     
         else:
             ## -------------------------
@@ -1360,7 +1564,6 @@ if __name__ == "__main__":
             scan_operator_right.start()
     
 
-
     # TASK 2: Implement recommendation query for User A
     #
     # SELECT R.MID
@@ -1372,81 +1575,17 @@ if __name__ == "__main__":
     #        ORDER BY score DESC
     #        LIMIT 1 )
 
-    def pull_recommendation(track_prov, propagate_prov):
-        scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
-        scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
-
-        filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[scan_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov = propagate_prov)
-
-        groupby_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        orderby_operator = OrderBy(inputs=[groupby_operator], outputs=[], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        limit_operator = TopK(inputs=[orderby_operator], outputs=[], k=1, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        project_operator = Project(inputs=[limit_operator], outputs=[], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        sink_operator = Sink(inputs=[project_operator], filepath=args.output, track_prov=track_prov, propagate_prov = propagate_prov)
-        sink_operator.get_next()
-
-        temp = None
-
-        if(track_prov):
-            temp = sink_operator.write_lineage(lineage_tuple_index)
-
-        if(propagate_prov):
-            temp = sink_operator.write_how_provenance(how_tuple_index)
-        
-        return temp
-
-    def push_recommendation(track_prov, propagate_prov):
-        sink_operator = Sink(inputs=[], filepath=args.output, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        project_operator = Project(inputs=[], outputs=[sink_operator], fields_to_keep=["MID"], aliasing=False, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        limit_operator = TopK(inputs=[], outputs=[project_operator], k=1, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        orderby_operator = OrderBy(inputs=[], outputs=[limit_operator], comparator=sorted, ASC=False, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        groupby_operator = GroupBy(inputs=[], outputs=[orderby_operator], agg_fun=mean, key=0, value=1, track_prov=track_prov, propagate_prov = propagate_prov) # key and value are attribute numbers after projection
-
-        project_operator = Project(inputs=[], outputs=[groupby_operator], fields_to_keep=["MID", "Rating"], track_prov=track_prov, propagate_prov = propagate_prov)
-
-        join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov, propagate_prov = propagate_prov)
-
-        filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left, track_prov=track_prov, propagate_prov = propagate_prov) 
-
-        scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
-        scan_operator_right = Scan(filepath=relation_2, outputs=[join_operator], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
-
-        scan_operator_left.start()
-        scan_operator_right.start()
-        
-        temp = None
-
-        if(track_prov):
-            temp = sink_operator.write_lineage(lineage_tuple_index)
-
-        if(propagate_prov):
-            temp = sink_operator.write_how_provenance(how_tuple_index)
-        
-        return temp
-
     if(args.query == "2"):
         if(args.pull == "1"):
             ## -------------------------
             ## Pull-based
             ## -------------------------
-            pull_recommendation(track_prov, propagate_prov)
+            pull_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index,how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
         else:
             ## -------------------------
             ## Push-based
             ## -------------------------
-            push_recommendation(track_prov, propagate_prov)
+            push_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
 
     # TASK 3: Implement explanation query for User A and Movie M
     #
@@ -1506,20 +1645,35 @@ if __name__ == "__main__":
     logger.info("Assignment #2")
 
     # TASK 1: Implement lineage query for movie recommendation
-
-    # YOUR CODE HERE
-
-    
     # TASK 2: Implement where-provenance query for 'likeness' prediction
-
-    # YOUR CODE HERE
-
-
     # TASK 3: Implement how-provenance query for movie recommendation
-
-    # YOUR CODE HERE
-    
-
     # TASK 4: Retrieve most responsible tuples for movie recommendation
 
-    # YOUR CODE HERE
+    # The TASK is decided based on the arguments passed in the execution command in the CLI
+
+    # if(args.query == "1"):
+    #     if(args.pull == "1"):
+    #         ## -------------------------
+    #         ## Pull-based
+    #         ## -------------------------
+    #         pull_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, where_row_index=where_row_index, where_attribute_index=where_attribute_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
+
+    #     else:
+    #         ## -------------------------
+    #         ## Push-based
+    #         ## -------------------------
+    #         push_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, where_row_index=where_row_index, where_attribute_index=where_attribute_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
+
+    
+
+    if(args.query == "2"):
+        if(args.pull == "1"):
+            ## -------------------------
+            ## Pull-based
+            ## -------------------------
+            pull_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
+        else:
+            ## -------------------------
+            ## Push-based
+            ## -------------------------
+            push_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
