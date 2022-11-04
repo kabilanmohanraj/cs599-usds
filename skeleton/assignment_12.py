@@ -59,8 +59,7 @@ class ATuple:
 
     # Returns the Where-provenance of the attribute at index 'att_index' of self
     def where(self, att_index) -> List[Tuple]:
-        # YOUR CODE HERE (ONLY FOR TASK 2 IN ASSIGNMENT 2)
-        pass
+        return self.operator.where(att_index, tuples=[self])
 
     # Returns the How-provenance of self
     def how(self) -> str:
@@ -288,12 +287,11 @@ class Scan(Operator):
                     if(self.track_prov):
                         self.input_to_output_mapping[processed_ATuple] = processed_ATuple
                     
-                    if(self.propagate_prov):
-                        if(self.relation_tag == "L"):
-                            processed_ATuple.metadata = "f"+str(idx)
-                        if(self.relation_tag == "R"):
-                            processed_ATuple.metadata = "r"+str(idx)
-                        Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
+                    if(self.relation_tag == "L"):
+                        processed_ATuple.metadata = "f"+str(idx)
+                    if(self.relation_tag == "R"):
+                        processed_ATuple.metadata = "r"+str(idx)
+                    Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
                 
         self.scan_pointer += self.batch_size
         
@@ -314,8 +312,14 @@ class Scan(Operator):
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
     def where(self, att_index, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 2 IN ASSIGNMENT 2)
-        pass
+        file_name = self.filepath.split("/")[-1]
+
+        temp_where_prov = []
+        for element in tuples:
+            line_number = int(element.metadata[1:])
+            temp_where_prov += [(file_name, line_number, self.input_to_output_mapping[element].tuple, element.tuple[att_index],)]
+
+        return temp_where_prov
 
     # Starts the process of reading tuples (only for push-based evaluation)
     def start(self):
@@ -330,12 +334,11 @@ class Scan(Operator):
                         if(self.track_prov):
                             self.input_to_output_mapping[processed_ATuple] = processed_ATuple
 
-                        if(self.propagate_prov):
-                            if(self.relation_tag == "L"):
-                                processed_ATuple.metadata = "f"+str(idx)
-                            if(self.relation_tag == "R"):
-                                processed_ATuple.metadata = "r"+str(idx)
-                            Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
+                        if(self.relation_tag == "L"):
+                            processed_ATuple.metadata = "f"+str(idx)
+                        if(self.relation_tag == "R"):
+                            processed_ATuple.metadata = "r"+str(idx)
+                        Scan.how_identifier_to_tuple_map[processed_ATuple.metadata] = processed_ATuple
 
             self.scan_pointer += self.batch_size
 
@@ -387,7 +390,7 @@ class Join(Operator):
                                    propagate_prov=propagate_prov,
                                    pull=pull,
                                    partition_strategy=partition_strategy)
-        # YOUR CODE HERE
+        
         self.left_inputs = left_inputs
         self.right_inputs = right_inputs
         self.left_join_attribute = left_join_attribute
@@ -467,8 +470,19 @@ class Join(Operator):
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
     def where(self, att_index, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 2 IN ASSIGNMENT 2)
-        pass
+        temp_where_prov = []
+        att_index = self.column_headers.index(att_index)
+
+        for element in tuples:
+            tuple_1_size = len(self.input_to_output_mapping[element][0].tuple)
+            if(att_index < tuple_1_size):
+                temp_where_prov += self.input_to_output_mapping[element][0].where(att_index)
+                att_index = tuple_1_size
+            else:
+                att_index -= tuple_1_size
+                temp_where_prov += self.input_to_output_mapping[element][1].where(att_index)
+                
+        return temp_where_prov
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
@@ -566,7 +580,7 @@ class Project(Operator):
                                       propagate_prov=propagate_prov,
                                       pull=pull,
                                       partition_strategy=partition_strategy)
-        # YOUR CODE HERE
+
         self.inputs = inputs
         self.outputs = outputs
         self.fields_to_keep = fields_to_keep
@@ -641,8 +655,10 @@ class Project(Operator):
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
     def where(self, att_index, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 2 IN ASSIGNMENT 2)
-        pass
+        temp_lineage = []
+        for element in tuples:
+            temp_lineage += self.input_to_output_mapping[element].where(self.fields_to_keep[att_index])
+        return temp_lineage
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
@@ -767,6 +783,9 @@ class GroupBy(Operator):
                 for item in tuples[1]:
                     if(self.key == 0 and self.value == 0):
                         self.grouping_dict[str(self.key)].append(int(item.tuple[self.value]))
+
+                        if(self.track_prov):
+                            self.intermediate_mapping[str(self.key)] += [item]
                     else:
                         self.grouping_dict[str(item.tuple[self.key])].append(int(item.tuple[self.value]))
 
@@ -782,7 +801,10 @@ class GroupBy(Operator):
                                 tuple=(self.agg_fun(self.grouping_dict[str(self.key)]),),
                                 operator=self)
                     output_data += [processed_ATuple]
-                    
+                
+                if(self.track_prov):                  
+                    self.input_to_output_mapping[processed_ATuple]  += self.intermediate_mapping[str(self.key)]
+
             else:
                 for dict_item in enumerate(self.grouping_dict.items()):
                     output_dict[dict_item[1][self.key]] = self.agg_fun(dict_item[1][self.value])
@@ -814,8 +836,13 @@ class GroupBy(Operator):
     # Returns the where-provenance of the attribute
     # at index 'att_index' for each tuple in 'tuples'
     def where(self, att_index, tuples):
-        # YOUR CODE HERE (ONLY FOR TASK 2 IN ASSIGNMENT 2)
-        pass
+        temp_where_prov = []
+        for element in tuples:
+            element_iter = self.input_to_output_mapping[element]
+            for subelement in element_iter:
+                temp_where_prov += subelement.where(att_index)
+
+        return temp_where_prov
 
     # Applies the operator logic to the given list of tuples
     def apply(self, tuples: List[ATuple]):
@@ -826,6 +853,10 @@ class GroupBy(Operator):
                 for item in tuples[1]:
                     if(self.key == 0 and self.value == 0):
                         self.grouping_dict[str(self.key)].append(int(item.tuple[self.value]))
+
+                        if(self.track_prov):
+                            self.intermediate_mapping[str(self.key)] += [item]
+                    
                     else:
                         self.grouping_dict[str(item.tuple[self.key])].append(int(item.tuple[self.value]))
 
@@ -850,6 +881,9 @@ class GroupBy(Operator):
                                 operator=self
                                 )
                         output_data += [processed_ATuple]
+
+                        if(self.track_prov):                  
+                            self.input_to_output_mapping[processed_ATuple]  += self.intermediate_mapping[str(self.key)]
                     except:
                         if(self.outputs != []):
                             self.outputs[0].apply([self.column_headers, None])
@@ -1360,6 +1394,15 @@ class Sink(Operator):
             write_to_file.append(item.tuple)
             self.write_to_txt(write_to_file)
         return temp
+    
+    # Collects and writes the where provenance of the specified tuples
+    def get_where_provenance(self, where_row_index, where_attribute_index):
+        temp = self.output_data[where_row_index].where(where_attribute_index)
+        write_to_file = []
+        for item in temp:
+            write_to_file.append(item)
+            self.write_to_txt(write_to_file)
+        return temp
 
     # Collects and writes the how provenance of the specified tuples
     def get_how_provenance(self, tuple_index):
@@ -1385,8 +1428,59 @@ def relation_filter_right(scan_output_right):
     if(scan_output_right is not None):
         filter_output_right = [value for value in scan_output_right if(value.tuple[1] == movie_id)]
         return filter_output_right
+
+def pull_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, output_path, track_prov, where_row_index=-1, where_attribute_index=-1):
+    scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L", track_prov=track_prov)
+    scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R", track_prov=track_prov)
+
+    filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left, track_prov=track_prov)
+    filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right, track_prov=track_prov)
+
+    join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov)
+
+    project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"], track_prov=track_prov)
+
+    average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=0, track_prov=track_prov)
+
+    sink_operator = Sink(inputs=[average_operator], filepath=output_path, track_prov=track_prov)
+    sink_operator.get_next()
+
+    temp = None
+
+    if(where_row_index != -1 and where_attribute_index != -1):
+        temp = sink_operator.get_where_provenance(where_row_index, where_attribute_index)
     
+    return temp
+
+def push_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, output_path, track_prov, where_row_index=-1, where_attribute_index=-1):
+    sink_operator = Sink(inputs=[], filepath=output_path, track_prov=track_prov)
+
+    average_operator = GroupBy(inputs=[], outputs=[sink_operator], agg_fun=mean, key=0, value=0, track_prov=track_prov) # key and value are attribute numbers after projection
+
+    project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["Rating"], track_prov=track_prov)
+
+    join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0, track_prov=track_prov)
+
+    filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left, track_prov=track_prov)
+    filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right, track_prov=track_prov)  
+
+    scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L", track_prov=track_prov)
+    scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], relation_tag="R", track_prov=track_prov)
+
+    scan_operator_left.start()
+    scan_operator_right.start()
+
+    temp = None
+
+    if(where_row_index != -1 and where_attribute_index != -1):
+        temp = sink_operator.get_where_provenance(where_row_index, where_attribute_index)
+        
+    return temp
+
+
+
 def pull_recommendation(relation_1, relation_2, relation_filter, output_path, track_prov, propagate_prov, lineage_tuple_index, how_tuple_index, responsibility_tuple_index):
+
     scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L", track_prov=track_prov, propagate_prov = propagate_prov)
     scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R", track_prov=track_prov, propagate_prov = propagate_prov)
 
@@ -1491,6 +1585,8 @@ if __name__ == "__main__":
         track_prov = True
     lineage_tuple_index = int(args.lineage)
     
+    if(args.where_row != -1 and args.where_attribute):
+        track_prov = True
     where_row_index = int(args.where_row)  
     where_attribute_index = int(args.where_attribute)
     
@@ -1516,52 +1612,18 @@ if __name__ == "__main__":
     #       AND F.UID1 = 'A'
     #       AND R.MID = 'M'
 
-    def pull_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, output_path):
-        scan_operator_left = Scan(filepath=relation_1, outputs=[], relation_tag="L")
-        scan_operator_right = Scan(filepath=relation_2, outputs=[], relation_tag="R")
-
-        filter_operator_left = Select(inputs=[scan_operator_left], outputs=[], predicate=relation_filter_left)
-        filter_operator_right = Select(inputs=[scan_operator_right], outputs=[], predicate=relation_filter_right)
-
-        join_operator = Join(left_inputs=[filter_operator_left], right_inputs=[filter_operator_right], outputs=[], left_join_attribute=1, right_join_attribute=0)
-
-        project_operator = Project(inputs=[join_operator], outputs=[], fields_to_keep=["Rating"])
-
-        average_operator = GroupBy(inputs=[project_operator], outputs=[], agg_fun=mean, key=0, value=0)
-
-        sink_operator = Sink(inputs=[average_operator], filepath=output_path)
-        sink_operator.get_next()
-        
-        return sink_operator.output_data
-
-
     if(args.query == "1"):
         if(args.pull == "1"):
             ## -------------------------
             ## Pull-based
             ## -------------------------
-            pull_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output)
+            pull_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output, track_prov=track_prov, where_row_index=where_row_index, where_attribute_index=where_attribute_index)
                     
         else:
             ## -------------------------
             ## Push-based
             ## -------------------------
-            sink_operator = Sink(inputs=[], filepath=args.output)
-
-            average_operator = GroupBy(inputs=[], outputs=[sink_operator], agg_fun=mean, key=0, value=0) # key and value are attribute numbers after projection
-
-            project_operator = Project(inputs=[], outputs=[average_operator], fields_to_keep=["Rating"])
-
-            join_operator = Join(left_inputs=[], right_inputs=[], outputs=[project_operator], left_join_attribute=1, right_join_attribute=0)
-
-            filter_operator_left = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_left)
-            filter_operator_right = Select(inputs=[], outputs=[join_operator], predicate=relation_filter_right)  
-
-            scan_operator_left = Scan(filepath=relation_1, outputs=[filter_operator_left], relation_tag="L")
-            scan_operator_right = Scan(filepath=relation_2, outputs=[filter_operator_right], relation_tag="R")
-
-            scan_operator_left.start()
-            scan_operator_right.start()
+            push_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output, track_prov=track_prov, where_row_index=where_row_index, where_attribute_index=where_attribute_index)
     
 
     # TASK 2: Implement recommendation query for User A
@@ -1644,27 +1706,27 @@ if __name__ == "__main__":
 
     logger.info("Assignment #2")
 
-    # TASK 1: Implement lineage query for movie recommendation
-    # TASK 2: Implement where-provenance query for 'likeness' prediction
-    # TASK 3: Implement how-provenance query for movie recommendation
-    # TASK 4: Retrieve most responsible tuples for movie recommendation
-
     # The TASK is decided based on the arguments passed in the execution command in the CLI
 
-    # if(args.query == "1"):
-    #     if(args.pull == "1"):
-    #         ## -------------------------
-    #         ## Pull-based
-    #         ## -------------------------
-    #         pull_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, where_row_index=where_row_index, where_attribute_index=where_attribute_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
+    # TASK 2: Implement where-provenance query for 'likeness' prediction
 
-    #     else:
-    #         ## -------------------------
-    #         ## Push-based
-    #         ## -------------------------
-    #         push_recommendation(relation_1=relation_1, relation_2=relation_2, relation_filter=relation_filter_left, output_path=args.output, track_prov=track_prov, propagate_prov=propagate_prov, lineage_tuple_index=lineage_tuple_index, where_row_index=where_row_index, where_attribute_index=where_attribute_index, how_tuple_index=how_tuple_index, responsibility_tuple_index=responsibility_tuple_index)
+    if(args.query == "1"):
+        if(args.pull == "1"):
+            ## -------------------------
+            ## Pull-based
+            ## -------------------------
+            pull_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output, track_prov=track_prov, where_row_index=where_row_index, where_attribute_index=where_attribute_index)
+                    
+        else:
+            ## -------------------------
+            ## Push-based
+            ## -------------------------
+            push_rating(relation_1=relation_1, relation_2=relation_2, relation_filter_left=relation_filter_left, relation_filter_right=relation_filter_right, output_path=args.output, track_prov=track_prov, where_row_index=where_row_index, where_attribute_index=where_attribute_index)
 
     
+    # TASK 1: Implement lineage query for movie recommendation
+    # TASK 3: Implement how-provenance query for movie recommendation
+    # TASK 4: Retrieve most responsible tuples for movie recommendation
 
     if(args.query == "2"):
         if(args.pull == "1"):

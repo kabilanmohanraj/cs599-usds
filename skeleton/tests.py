@@ -7,6 +7,8 @@ relation_2 = "../data/movie_ratings_toy.txt"
 
 how_tuple_index = 0
 lineage_tuple_index = 0
+where_row_index = 0
+where_attribute_index = 0
 
 # Filter function
 def relation_filter_left(scan_output_left):
@@ -24,7 +26,6 @@ def relation_filter_right(scan_output_right):
 ## -------------------------
 def test_pull_lineage():
     correct_answer = [(1, 2), (2, 1, 4), (1, 3), (3, 1, 5), (1, 4), (4, 1, 4), (1, 5), (5, 1, 3)]
-    # relation_1, relation_2, relation_filter, output_path, track_prov, propagate_prov, lineage_tuple_index, where_row_index, where_attribute_index, how_tuple_index, responsibility_tuple_index
     temp = pull_recommendation(relation_1, relation_2, relation_filter_left, "", True, False, 0, -1, -1)
     collected_output = []
     for item in temp:
@@ -32,7 +33,9 @@ def test_pull_lineage():
     assert(collected_output == correct_answer)
 
 def test_pull_where_provenance():
-    pass
+    correct_answer = [('movie_ratings_toy.txt', 3, (2, 1, 4), 4), ('movie_ratings_toy.txt', 5, (3, 1, 5), 5), ('movie_ratings_toy.txt', 7, (4, 1, 4), 4), ('movie_ratings_toy.txt', 9, (5, 1, 3), 3)]
+    collected_output = pull_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, "", True, where_row_index, where_attribute_index)
+    assert(collected_output == correct_answer)
 
 def test_pull_how_provenance():
     correct_answer = "AVG( (f1*r3@4), (f2*r5@5), (f3*r7@4), (f4*r9@3) )"
@@ -57,7 +60,9 @@ def test_push_lineage():
     assert(collected_output == correct_answer)
 
 def test_push_where_provenance():
-    pass
+    correct_answer = [('movie_ratings_toy.txt', 3, (2, 1, 4), 4), ('movie_ratings_toy.txt', 5, (3, 1, 5), 5), ('movie_ratings_toy.txt', 7, (4, 1, 4), 4), ('movie_ratings_toy.txt', 9, (5, 1, 3), 3)]
+    collected_output = push_rating(relation_1, relation_2, relation_filter_left, relation_filter_right, "", True, where_row_index, where_attribute_index)
+    assert(collected_output == correct_answer)
 
 def test_push_how_provenance():
     correct_answer = "AVG( (f1*r3@4), (f2*r5@5), (f3*r7@4), (f4*r9@3) )"
