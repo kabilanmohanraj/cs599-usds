@@ -6,7 +6,6 @@ import argparse
 import collections
 
 import csv
-from decimal import DivisionByZero
 from email import header
 import logging
 from enum import Enum
