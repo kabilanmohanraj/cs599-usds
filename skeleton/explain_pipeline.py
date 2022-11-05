@@ -10,6 +10,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+from model import _CNN
+
 
 # This is a color map that you can use to plot the SHAP heatmap on the input MRI
 colors = []
@@ -81,7 +83,8 @@ def plot_shap_on_mri(subject_mri, shap_values):
 if __name__ == '__main__':
     # TASK I: Load CNN model and isntances (MRIs)
     #         Report how many of the 19 MRIs are classified correctly
-    # YOUR CODE HERE 
+    cnn_model = _CNN(128, 0.2)
+    print(cnn_model)
 
     # TASK II: Probe the CNN model to generate predictions and compute the SHAP 
     #          values for each MRI using the DeepExplainer or the GradientExplainer. 
