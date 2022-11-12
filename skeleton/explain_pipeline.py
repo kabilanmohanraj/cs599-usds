@@ -1,5 +1,5 @@
 import argparse
-import matplotlib as plt
+import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import nibabel as nib
 import numpy as np
@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from model import _CNN
+from data_util import split_csv
+from data_util import CNN_Data
 
 
 # This is a color map that you can use to plot the SHAP heatmap on the input MRI
@@ -33,8 +35,13 @@ def prepare_dataloaders(bg_csv, test_csv, bg_batch_size = 8, test_batch_size= 1,
         test_batch_size (int): The batch size of the test data loader
         num_workers (int): The number of sub-processes to use for dataloader
     '''
-    # YOUR CODE HERE
-    pass
+    bg_dataset = CNN_Data(bg_csv)
+    test_dataset = CNN_Data(test_csv)
+
+    bg_loader = DataLoader(bg_dataset, batch_size=bg_batch_size, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, num_workers=num_workers)
+
+    return bg_loader, test_loader
 
 # Generates SHAP values for all pixels in the MRIs given by the test_loader
 def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
@@ -81,10 +88,42 @@ def plot_shap_on_mri(subject_mri, shap_values):
 
 
 if __name__ == '__main__':
-    # TASK I: Load CNN model and isntances (MRIs)
+    # TASK I: Load CNN model and instances (MRIs)
     #         Report how many of the 19 MRIs are classified correctly
-    cnn_model = _CNN(128, 0.2)
-    print(cnn_model)
+
+    # import new CNN model
+    cnn_model = _CNN(20, 0.15)
+
+    # warm the new model with the state_dict from the checkpointed model
+    checkpoint = torch.load(f="./ADNI3/cnn_best.pth", map_location=torch.device('cpu'))
+    cnn_model.load_state_dict(checkpoint.get("state_dict"))
+    cnn_model.eval()
+
+    # data loaders
+    split_csv("./ADNI3/ADNI3.csv")
+
+    bg_csv = "./ADNI3/bg_mri_data.csv"
+    test_csv = "./ADNI3/test_mri_data.csv"
+    bg_loader, test_loader = prepare_dataloaders(bg_csv=bg_csv, test_csv=test_csv)
+
+    # testing the cnn model with the test data loader
+    val_output = []
+    number_of_correct_predictions = 0
+    with torch.no_grad():
+        for test_image, test_label in test_loader:
+            output_data = cnn_model(torch.unsqueeze(test_image, 1))
+            if(output_data[0][0] > output_data[0][1]):
+                val_output.append(0)
+                if(test_label == 0):
+                    number_of_correct_predictions += 1
+            else:
+                val_output.append(1)
+                if(test_label == 1):
+                    number_of_correct_predictions += 1
+        
+            # print(val_output, test_label)
+        print("The number of correct predictions is :", number_of_correct_predictions)
+
 
     # TASK II: Probe the CNN model to generate predictions and compute the SHAP 
     #          values for each MRI using the DeepExplainer or the GradientExplainer. 

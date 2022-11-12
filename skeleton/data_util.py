@@ -5,6 +5,7 @@ import pandas as pd
 import random
 import torch
 from torch.utils.data import Dataset
+from torch import from_numpy
 
 # The dataset
 class CNN_Data(Dataset):
@@ -16,13 +17,11 @@ class CNN_Data(Dataset):
         Attributes:
             csv_dir (str): The path to the CSV file that contains the MRI metadata.
         '''
-        # YOUR CODE HERE 
-        pass
+        self.csv_dir = pd.read_csv(csv_dir, header=None)
 
     # Returns total number of data samples
     def __len__(self):
-        # YOUR CODE HERE 
-        pass
+        return len(self.csv_dir)
 
     # Returns the actual MRI data, the MRI filename, and the label
     def __getitem__(self, idx):
@@ -30,8 +29,12 @@ class CNN_Data(Dataset):
         Attribute:
             idx (int): The sample MRI index.
         '''
-        # YOUR CODE HERE 
-        pass
+        mri_img_path = os.path.join(self.csv_dir.iloc[idx, 0])
+        mri_image = from_numpy(np.load(mri_img_path))
+        label = self.csv_dir.iloc[idx, 1]
+
+        return mri_image, label
+
 
 # This is a helper function that performs the following steps:
 #   1. Retrieves the metadata for the 19 MRIs provided 
@@ -46,8 +49,48 @@ def split_csv(csv_file, output_folder='./ADNI3', random_seed = 1051):
         output_folder (str): The path to store the CSV files for the test and background datasets.
         random_seed (int): The seed number to shuffle the csv_file (you can also define your own seed).
     '''
-    # YOUR CODE HERE 
-    pass
+    mri_filepaths, mri_labels = read_csv(csv_file)
+    mri_filePaths_in_dir = os.listdir("./ADNI3/")
+
+    mri_filepaths_to_keep = []
+    mri_labels_to_keep = []
+
+    samples_in_test = 5
+    
+    for i in range(len(mri_filepaths)):
+        if(mri_filepaths[i] in mri_filePaths_in_dir):
+            mri_filepaths_to_keep.append(mri_filepaths[i])
+            mri_labels_to_keep.append(mri_labels[i])
+    
+    # returns the path and label lists split randomly
+    def randomly_partition_lists():
+        random.seed(random_seed)
+
+        # shuffling the mri filepaths list
+        random.shuffle(mri_filepaths_to_keep)
+        test_mri_paths = mri_filepaths_to_keep[:samples_in_test]
+        bg_mri_paths = mri_filepaths_to_keep[samples_in_test:]
+
+        # shuffling the mri labels list
+        random.shuffle(mri_labels_to_keep)
+        test_mri_labels = mri_labels_to_keep[:samples_in_test]
+        bg_mri_labels = mri_labels_to_keep[samples_in_test:]
+
+        return test_mri_paths, bg_mri_paths, test_mri_labels, bg_mri_labels
+
+    test_mri_paths, bg_mri_paths, test_mri_labels, bg_mri_labels = randomly_partition_lists()
+
+    # generate CSV files using the test and bg lists
+    with open(output_folder+"/test_mri_data.csv", "w") as output_file:
+        csv_writer = csv.writer(output_file, delimiter=",")
+        for i in range(len(test_mri_paths)):
+            csv_writer.writerow([output_folder+"/"+test_mri_paths[i], test_mri_labels[i]])
+    
+    with open(output_folder+"/bg_mri_data.csv", "w") as output_file:
+        csv_writer = csv.writer(output_file, delimiter=",")
+        for i in range(len(bg_mri_paths)):
+            csv_writer.writerow([output_folder+"/"+bg_mri_paths[i], bg_mri_labels[i]])
+
 
 # Returns one list containing the MRI filepaths and a second list with the respective labels
 def read_csv(filename):
@@ -55,8 +98,17 @@ def read_csv(filename):
     Attributes:
         filename (str): The path to the CSV file that contains the MRI metadata.
     '''
-    # YOUR CODE HERE 
-    pass
+    mri_filepaths = []
+    mri_labels = []
+
+    with open(filename, "r") as mri_metadata:
+        csv_reader = csv.reader(mri_metadata, delimiter=",")
+        csv_reader.__next__() # skip the header
+        for row in csv_reader:
+            mri_filepaths.append(row[1])
+            mri_labels.append(row[12])
+    
+    return mri_filepaths, mri_labels
 
 # Regions inside a segmented brain MRI (ONLY FOR TASK IV)
 brain_regions = {1.:'TL hippocampus R',
