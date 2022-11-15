@@ -68,11 +68,6 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
     # shap_values = deep_explainer.shap_values(torch.unsqueeze(torch.squeeze(bg_images, 0), 1))
     torch.unsqueeze(torch.squeeze(bg_images, 0), 1)
 
-    print("test image size:", np.shape(test_images))
-    print("\n")
-    print(np.shape(torch.unsqueeze(test_images, 0)))
-    print("\n\n")
-
     print(len(shap_values))
     print("\n\n")
     print("Shap value shape:" ,np.shape(shap_values))
@@ -80,39 +75,31 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
     print(np.sum(shap_values))
     print("\n\n")
 
-    print(np.shape(shap_values[0][0][0][91][:][:]))
-
-    print(np.shape(shap_values[0]))
-    print(pd.DataFrame(shap_values[0][0][0][91][:][:]).shape)
-    plt.imshow(shap_values[1][0][0][:][109][:])
-    print(np.shape(shap_values))
-    plt.savefig("./output/shap_values.png")
-    plt.imshow(shap_values[1][0][0][:][:][91])
-    plt.savefig("./output/shap_values1.png")
-    print("\n\n")
-
     test = [s.shape for s in shap_values]
     print(test[0])
     print("\n\n")
 
-    shap_numpy = [np.swapaxes(s, 1, -1) for s in shap_values]
-    test_numpy =  np.squeeze(np.swapaxes(test_images.numpy(), 1, -1))
-    print(np.shape(test_images.numpy()))
-    # test_numpy = np.squeeze(test_images.numpy(), 0)
+    shap_numpy = [s for s in shap_values]
+    test_numpy =  np.expand_dims(test_images.numpy(), -1)
+    print("Before test expand dims:", np.shape(test_images.numpy()))
+    print("After test_numpy expand dims:", np.shape(test_numpy))
+    # test_numpy = np.unsqueeze(test_images.numpy(), 0)
 
     print("\n\n")
     print(np.shape(shap_numpy), np.shape(test_numpy), np.shape(test_images))
     # print(np.shape(np.squeeze(shap_numpy, 1)))
     test1 = np.squeeze(shap_numpy, 1)
+    test1 = np.expand_dims(test1, -1)
     print(test1.shape)
     test1 = test1[0]
     print(test1.shape)
-    print(test1[91][:][:].shape)
+    print(test1[0][:][91].shape)
+    print(test_numpy.shape)
     print("\n\n")
 
     # plot the feature attributions
     # shap.image_plot(test1, -test_numpy, show=False)
-    shap.image_plot(np.rot90(test1[:][:][91], k=3), test_numpy[:][:][91], show=False) # -> this works
+    shap.image_plot(np.rot90(test1[0][:][91], k=1), np.rot90(test_numpy[0][:][91]), show=False) # -> this works
     plt.savefig("./output/shap_values2.png")
 
 # Aggregates SHAP values per brain region and returns a dictionary that maps 
