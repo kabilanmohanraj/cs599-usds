@@ -33,7 +33,7 @@ class CNN_Data(Dataset):
         mri_image = from_numpy(np.load(mri_img_path))
         label = self.csv_dir.iloc[idx, 1]
 
-        return mri_image, label
+        return mri_image, mri_img_path, label
 
 
 # This is a helper function that performs the following steps:
@@ -64,14 +64,14 @@ def split_csv(csv_file, output_folder='./ADNI3', random_seed = 1051):
     
     # returns the path and label lists split randomly
     def randomly_partition_lists():
-        random.seed(random_seed)
-
         # shuffling the mri filepaths list
+        random.seed(random_seed)
         random.shuffle(mri_filepaths_to_keep)
         test_mri_paths = mri_filepaths_to_keep[:samples_in_test]
         bg_mri_paths = mri_filepaths_to_keep[samples_in_test:]
 
         # shuffling the mri labels list
+        random.seed(random_seed)
         random.shuffle(mri_labels_to_keep)
         test_mri_labels = mri_labels_to_keep[:samples_in_test]
         bg_mri_labels = mri_labels_to_keep[samples_in_test:]

@@ -1,9 +1,11 @@
 import argparse
+import csv
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import nibabel as nib
 import numpy as np
 import os
+import pandas as pd
 import shap
 import torch
 import torch.nn as nn
@@ -52,8 +54,64 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
         mri_count (int): The total number of explanations to generate.
         save_path (str): The path to save the generated SHAP values (as .npy files).
     '''
-    # YOUR CODE HERE
-    pass
+    batch = next(iter(bg_loader))
+    bg_images, filename, labels = batch
+    print("bg_image size", np.shape(bg_images)) # torch.Size([8, 182, 218, 182])
+    print("\n")
+    deep_explainer = shap.DeepExplainer(cnn_model, torch.unsqueeze(torch.squeeze(bg_images, 0), 1))
+    print(np.shape(torch.unsqueeze(torch.squeeze(bg_images, 0), 1))) # torch.Size([8, 1, 182, 218, 182])
+    print("\n\n")
+
+    batch = next(iter(test_loader))
+    test_images, filename, labels = batch
+    shap_values = deep_explainer.shap_values(torch.unsqueeze(test_images, 0))
+    # shap_values = deep_explainer.shap_values(torch.unsqueeze(torch.squeeze(bg_images, 0), 1))
+    torch.unsqueeze(torch.squeeze(bg_images, 0), 1)
+
+    print("test image size:", np.shape(test_images))
+    print("\n")
+    print(np.shape(torch.unsqueeze(test_images, 0)))
+    print("\n\n")
+
+    print(len(shap_values))
+    print("\n\n")
+    print("Shap value shape:" ,np.shape(shap_values))
+    print("\n\n")
+    print(np.sum(shap_values))
+    print("\n\n")
+
+    print(np.shape(shap_values[0][0][0][91][:][:]))
+
+    print(np.shape(shap_values[0]))
+    print(pd.DataFrame(shap_values[0][0][0][91][:][:]).shape)
+    plt.imshow(shap_values[1][0][0][:][109][:])
+    print(np.shape(shap_values))
+    plt.savefig("./output/shap_values.png")
+    plt.imshow(shap_values[1][0][0][:][:][91])
+    plt.savefig("./output/shap_values1.png")
+    print("\n\n")
+
+    test = [s.shape for s in shap_values]
+    print(test[0])
+    print("\n\n")
+
+    shap_numpy = [np.swapaxes(s, 1, -1) for s in shap_values]
+    test_numpy = np.squeeze(np.swapaxes(test_images.numpy(), 1, -1))
+
+    print("\n\n")
+    print(np.shape(shap_numpy), np.shape(test_numpy), np.shape(test_images))
+    # print(np.shape(np.squeeze(shap_numpy, 1)))
+    test1 = np.squeeze(shap_numpy, 1)
+    print(test1.shape)
+    test1 = test1[0]
+    print(test1.shape)
+    print(test1[91][:][:].shape)
+    print("\n\n")
+
+    # plot the feature attributions
+    shap.image_plot(shap_numpy, -test_numpy, show=False)
+    # shap.image_plot(test1[91][:][:], -test_numpy, show=False)
+    plt.savefig("./output/shap_values2.png")
 
 # Aggregates SHAP values per brain region and returns a dictionary that maps 
 # each region to the average SHAP value of its pixels. 
@@ -86,8 +144,17 @@ def plot_shap_on_mri(subject_mri, shap_values):
     # YOUR CODE HERE
     pass
 
+def write_to_csv(filepath, header, data):
+    with open(filepath, 'w') as output_file:
+        output_writer = csv.writer(output_file, delimiter=",")
+        output_writer.writerow(header) # Write column headers
+        for item in data:
+            output_writer.writerow(item)
 
 if __name__ == '__main__':
+
+    output_filepath = "./output/"
+
     # TASK I: Load CNN model and instances (MRIs)
     #         Report how many of the 19 MRIs are classified correctly
 
@@ -110,8 +177,8 @@ if __name__ == '__main__':
     val_output = []
     number_of_correct_predictions = 0
     with torch.no_grad():
-        for test_image, test_label in test_loader:
-            output_data = cnn_model(torch.unsqueeze(test_image, 1))
+        for test_image, test_mri_path, test_label in test_loader:
+            output_data = cnn_model(torch.unsqueeze(test_image, 0))
             if(output_data[0][0] > output_data[0][1]):
                 val_output.append(0)
                 if(test_label == 0):
@@ -121,15 +188,26 @@ if __name__ == '__main__':
                 if(test_label == 1):
                     number_of_correct_predictions += 1
         
-            # print(val_output, test_label)
-        print("The number of correct predictions is :", number_of_correct_predictions)
+            header = ("Classified", "Value")
+            data = [("Correct", number_of_correct_predictions), ("Incorrect", len(val_output)-number_of_correct_predictions)]
+        
+        # write results to CSV 
+        write_to_csv(output_filepath+"task-1.csv", header, data)
 
 
     # TASK II: Probe the CNN model to generate predictions and compute the SHAP 
     #          values for each MRI using the DeepExplainer or the GradientExplainer. 
     #          Save the generated SHAP values that correspond to instances with a
     #          correct prediction into output/SHAP/data/
-    # YOUR CODE HERE 
+    # YOUR CODE HERE
+    # deep_explainer = shap.DeepExplainer()
+
+    # * (Tensor input, Tensor weight, Tensor bias, tuple of ints stride, tuple of ints padding, tuple of ints dilation, int groups)
+    #   didn't match because some of the arguments have invalid types: (DataLoader, Parameter, NoneType, tuple, tuple, tuple, int)
+    # * (Tensor input, Tensor weight, Tensor bias, tuple of ints stride, str padding, tuple of ints dilation, int groups)
+    #   didn't match because some of the arguments have invalid types: (DataLoader, Parameter, NoneType, tuple, tuple, tuple, int)
+
+    create_SHAP_values(bg_loader, test_loader, 100, output_filepath)
 
     # TASK III: Plot an explanation (pixel-based SHAP heatmaps) for a random MRI. 
     #           Save heatmaps into output/SHAP/heatmaps/
@@ -139,7 +217,5 @@ if __name__ == '__main__':
     #          Report the top-10 most contributing regions per class (AD/NC) as top10_{class}.csv
     #          Save CSV files into output/top10/
     # YOUR CODE HERE 
-
-    pass
 
 
