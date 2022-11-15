@@ -96,21 +96,23 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
     print("\n\n")
 
     shap_numpy = [np.swapaxes(s, 1, -1) for s in shap_values]
-    test_numpy = np.squeeze(np.swapaxes(test_images.numpy(), 1, -1))
+    test_numpy =  np.squeeze(np.swapaxes(test_images.numpy(), 1, -1))
+    print(np.shape(test_images.numpy()))
+    # test_numpy = np.squeeze(test_images.numpy(), 0)
 
     print("\n\n")
     print(np.shape(shap_numpy), np.shape(test_numpy), np.shape(test_images))
     # print(np.shape(np.squeeze(shap_numpy, 1)))
     test1 = np.squeeze(shap_numpy, 1)
     print(test1.shape)
-    test1 = test1[1]
+    test1 = test1[0]
     print(test1.shape)
     print(test1[91][:][:].shape)
     print("\n\n")
 
     # plot the feature attributions
     # shap.image_plot(test1, -test_numpy, show=False)
-    shap.image_plot(test1[:][109][:], -test_numpy[:][109][:], show=False) # -> this works
+    shap.image_plot(np.rot90(test1[:][:][91], k=3), test_numpy[:][:][91], show=False) # -> this works
     plt.savefig("./output/shap_values2.png")
 
 # Aggregates SHAP values per brain region and returns a dictionary that maps 
