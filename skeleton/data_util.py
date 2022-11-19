@@ -42,7 +42,7 @@ class CNN_Data(Dataset):
 #    - One that will be used for probing/testing the model (make sure it contains at least 5 MRIs).
 #    - One the will be used as a background dataset for SHAP
 # The function creates two new CSV files containing the metadata for each of the above datasets.
-def split_csv(csv_file, output_folder='./ADNI3', random_seed = 1051):
+def split_csv(csv_file, output_folder='../ADNI3', random_seed = 1051):
     '''
     Attributes:
         csv_file (str): The path to the CSV file that contains the MRI metadata.
@@ -50,7 +50,7 @@ def split_csv(csv_file, output_folder='./ADNI3', random_seed = 1051):
         random_seed (int): The seed number to shuffle the csv_file (you can also define your own seed).
     '''
     mri_filepaths, mri_labels = read_csv(csv_file)
-    mri_filePaths_in_dir = os.listdir("./ADNI3/")
+    mri_filePaths_in_dir = os.listdir("../ADNI3/")
 
     mri_filepaths_to_keep = []
     mri_labels_to_keep = []
