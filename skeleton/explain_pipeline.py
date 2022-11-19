@@ -55,21 +55,21 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
         mri_count (int): The total number of explanations to generate.
         save_path (str): The path to save the generated SHAP values (as .npy files).
     '''
+    all_bg_images = []
 
-    # while()
-    batch = next(iter(bg_loader))
-    bg_images, filename, _ = batch
-    
+    iterator = iter(bg_loader)
+    for _, sample in enumerate(bg_loader):
+        bg_images, filename, _ = sample
+        all_bg_images += bg_images
+    print(np.shape(all_bg_images))
     deep_explainer = shap.DeepExplainer(cnn_model, torch.unsqueeze(torch.squeeze(bg_images, 0), 1))
 
     iterator = iter(test_loader)
     for _ in range(mri_count):
-        print(_)
         batch = next(iterator)
         test_image, filename, _ = batch
-        print(filename)
         shap_values = deep_explainer.shap_values(torch.unsqueeze(test_image, 0))
-        np.save(save_path+"SHAP/data/"+os.path.split(filename[0])[1].strip(".npy"), shap_values)
+        np.save(save_path+"/SHAP/data/"+os.path.split(filename[0])[1].strip(".npy"), shap_values)
 
 # Aggregates SHAP values per brain region and returns a dictionary that maps 
 # each region to the average SHAP value of its pixels. 
@@ -85,13 +85,10 @@ def aggregate_SHAP_values_per_region(shap_values, seg_path, brain_regions):
     image = nib.load(seg_path)
     image_data = image.get_fdata()
 
-    agg_values = []
-
     for region in brain_regions.keys():
-        agg_values.append(np.mean(shap_values, where = (region == image_data)))
-        # agg_shap_value = np.mean(shap_values, where = (region == image_data))
-    
-    region_to_avg_dict[brain_regions[region]] = agg_values
+        sum_shap_value = np.sum(shap_values, where = (region == image_data))
+        pixel_count = np.count_nonzero(region == image_data)
+        region_to_avg_dict[region] = [sum_shap_value, pixel_count]
 
     return region_to_avg_dict
 
@@ -101,8 +98,16 @@ def output_top_10_lst(csv_file):
     Attribute:
         csv_file (str): The path to a CSV file that contains the aggregated SHAP values per region.
     '''
-    # YOUR CODE HERE
-    pass
+    data_to_sort = []
+
+    with open(csv_file) as input_file:
+        input_reader = csv.reader(input_file, delimiter=",")
+        next(input_reader)
+        for row in input_reader:
+            data_to_sort.append(row)
+    sorted_list = sorted(data_to_sort, key=lambda item: item[2], reverse=True)
+    
+    return sorted_list[:10]
 
 # Plots SHAP values on a 2D slice of the 3D MRI. 
 def plot_shap_on_mri(subject_mri, shap_values, label):
@@ -118,19 +123,27 @@ def plot_shap_on_mri(subject_mri, shap_values, label):
     shap_numpy = np.expand_dims(shap_numpy, -1)
     shap_numpy = shap_numpy[label]
 
+    print(np.shape(shap_numpy))
+    print(np.shape(test_numpy))
+
     # plot the feature attributions
-    shap.image_plot(np.rot90(shap_numpy[0][91], k=1), np.rot90(test_numpy[:][:][91]),show=False)
-    shap.image_plot(np.rot90(shap_numpy[0][:][109], k=1), np.rot90(test_numpy[:][:][:][109]),show=False)
-    shap.image_plot(np.rot90(shap_numpy[0][:][:][91], k=1), np.rot90(test_numpy[:][:][:][:][91]),show=False)
+    fig, axs = plt.subplots(2)
+    # shap.image_plot(np.rot90(shap_numpy[0][91, :, :], k=1), np.rot90(test_numpy[91, :, :]),show=False)
+    # shap.image_plot(np.rot90(shap_numpy[0][:, 109, :], k=1), np.rot90(test_numpy[:, 109, :]),show=False)
+    shap.image_plot(np.rot90(shap_numpy[0][:, :, 91], k=1), np.rot90(test_numpy[:, :, 91]),show=False)
     # shap.image_plot([np.rot90(shap_numpy[0][91], k=1), np.rot90(shap_numpy[0][91], k=1)], [np.rot90(test_numpy[:][:][91]), np.rot90(test_numpy[:][:][91])],show=False)
-    plt.savefig("../output/SHAP/heatmaps/shap.png")
+    plt.savefig("../output/SHAP/heatmaps/shap2.png")
 
 def write_to_csv(filepath, header, data):
     with open(filepath, 'w') as output_file:
         output_writer = csv.writer(output_file, delimiter=",")
         output_writer.writerow(header) # Write column headers
-        for item in data:
-            output_writer.writerow(item)
+        if(isinstance(data, dict)):
+            for item in data.items():
+                output_writer.writerow([item[0], item[1][1], item[1][0]])
+        else:
+            for item in data:
+                output_writer.writerow(item)
 
 
 if __name__ == '__main__':
@@ -150,25 +163,32 @@ if __name__ == '__main__':
     input_filepath = args.dataFolder
     output_filepath = args.outputFolder
 
+    if(input_filepath[-1] == os.sep):
+        input_filepath = input_filepath[:-1]
+    
+    if(output_filepath[-1] == os.sep):
+        output_filepath = output_filepath[:-1]
+
+    
+    # TASK I: Load CNN model and instances (MRIs)
+    #         Report how many of the 19 MRIs are classified correctly
+
+    # data loaders
+    split_csv(input_filepath+"/ADNI3.csv")
+
+    bg_csv = input_filepath+"/bg_mri_data.csv"
+    test_csv = input_filepath+"/test_mri_data.csv"
+    bg_loader, test_loader = prepare_dataloaders(bg_csv=bg_csv, test_csv=test_csv)
+
+    # import new CNN model
+    cnn_model = _CNN(20, 0.15)
+
+    # warm the new model with the state_dict from the checkpointed model
+    checkpoint = torch.load(f=input_filepath+"/cnn_best.pth", map_location=torch.device('cpu'))
+    cnn_model.load_state_dict(checkpoint.get("state_dict"))
+    cnn_model.eval()
+
     if(args.task == "1"):
-        # TASK I: Load CNN model and instances (MRIs)
-        #         Report how many of the 19 MRIs are classified correctly
-
-        # import new CNN model
-        cnn_model = _CNN(20, 0.15)
-
-        # warm the new model with the state_dict from the checkpointed model
-        checkpoint = torch.load(f=input_filepath+"/cnn_best.pth", map_location=torch.device('cpu'))
-        cnn_model.load_state_dict(checkpoint.get("state_dict"))
-        cnn_model.eval()
-
-        # data loaders
-        split_csv(input_filepath+"/ADNI3.csv")
-
-        bg_csv = input_filepath+"/bg_mri_data.csv"
-        test_csv = input_filepath+"/test_mri_data.csv"
-        bg_loader, test_loader = prepare_dataloaders(bg_csv=bg_csv, test_csv=test_csv)
-
         # testing the cnn model with the test data loader
         val_output = []
         number_of_correct_predictions = 0
@@ -193,8 +213,8 @@ if __name__ == '__main__':
                             if(curr_label == 1):
                                 number_of_correct_predictions += 1
                 
-                    header = ("Classified", "Value")
-                    data = [("Correct", number_of_correct_predictions), ("Incorrect", len(val_output)-number_of_correct_predictions)]
+            header = ("Classified", "Value")
+            data = [("Correct", number_of_correct_predictions), ("Incorrect", len(val_output)-number_of_correct_predictions)]
                 
             # write results to CSV 
             write_to_csv(output_filepath+"/task-1.csv", header, data)
@@ -207,6 +227,7 @@ if __name__ == '__main__':
         #          correct prediction into output/SHAP/data/
         # YOUR CODE HERE
         create_SHAP_values(bg_loader, test_loader, 5, output_filepath)
+
 
     if(args.task == "3"):
         # TASK III: Plot an explanation (pixel-based SHAP heatmaps) for a random MRI. 
@@ -223,21 +244,74 @@ if __name__ == '__main__':
         plot_shap_on_mri(ad_1_image, ad_1, 1)
         plot_shap_on_mri(ad_0_image, ad_0, 0)
 
+
     if(args.task == "4"):
         # TASK IV: Map each SHAP value to its brain region and aggregate SHAP values per region.
         #          Report the top-10 most contributing regions per class (AD/NC) as top10_{class}.csv
         #          Save CSV files into output/top10/
         # YOUR CODE HERE
 
-        ad_0_list = ["../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy",
-    "../ADNI3/ADNI_099_S_6632_MR_Accelerated_Sag_IR-FSPGR___br_raw_20200207123735297_1_S920619_I1286418.npy",
-    "../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy"]
+        ad_0_segpath = []
+        ad_1_segpath = []
 
-        ad_1_list = ["../ADNI3/ADNI_011_S_6303_MR_Accelerated_Sagittal_MPRAGE__br_raw_20190430142811025_189_S819896_I1160021.npy",
-    "../ADNI3/ADNI_022_S_6013_MR_Sagittal_3D_Accelerated_MPRAGE_br_raw_20190314145101831_129_S806245_I1142379.npy"]
+        ad_0_shap_values = []
+        ad_1_shap_values = []
 
-        for filename in ad_0_list:
-            aggregate_SHAP_values_per_region(ad_0_list, filename, brain_regions)
+        with open(input_filepath+"/test_mri_data.csv") as test_mri_csv:
+            data = test_mri_csv.readlines()
+            for line in data:
+                if(line[-2] == "0"):
+                    ad_0_shap_values.append(input_filepath+"/"+os.path.split(line.split(",")[0])[1])
+                    temp_segpath = os.path.split(line.split(",")[0])[1].strip(".npy") + ".nii"
+                    ad_0_segpath.append(input_filepath+"/seg/"+temp_segpath)
+                if(line[-2] == "1"):
+                    ad_1_shap_values.append(input_filepath+"/"+os.path.split(line.split(",")[0])[1])
+                    temp_segpath = os.path.split(line.split(",")[0])[1].strip(".npy") + ".nii"
+                    ad_1_segpath.append(input_filepath+"/seg/"+temp_segpath)
+
+        ad_0_dict = {} # to store sum and count for aggregation
+        ad_1_dict = {} # to store sum and count for aggregation
+        temp = {}
+        header = ("Region number", "region", "value")
+
+        for i in range(len(ad_0_segpath)):
+            temp = aggregate_SHAP_values_per_region(np.load(ad_0_shap_values[i]), ad_0_segpath[i], brain_regions)
+
+            if(len(ad_0_dict) == 0):
+                ad_0_dict = temp
+            for key in brain_regions.keys():
+                ad_0_dict[key] = [ad_0_dict[key][0] + temp[key][0], ad_0_dict[key][1] + temp[key][1]]
+            
+            if(i == len(ad_0_segpath)-1):
+                for key in brain_regions.keys():
+                    ad_0_dict[key] = [ad_0_dict[key][0] / ad_0_dict[key][1], brain_regions[key]]
         
-        for filename in ad_1_list:
-            aggregate_SHAP_values_per_region(ad_0_list, filename, brain_regions)
+         # writing all aggregated shap values to CSV
+        write_to_csv(output_filepath+"/agg_ad_0.csv", header, ad_0_dict)
+
+        # sorting the list based on the average shap values
+        sorted_data = output_top_10_lst(output_filepath+"/agg_ad_0.csv")
+
+        # writing to output file
+        write_to_csv(output_filepath+"/task-4-false.csv", header, sorted_data)
+
+        for i in range(len(ad_1_segpath)):
+            temp = aggregate_SHAP_values_per_region(np.load(ad_1_shap_values[i]), ad_1_segpath[i], brain_regions)
+
+            if(len(ad_1_dict) == 0):
+                ad_1_dict = temp
+            for key in brain_regions.keys():
+                ad_1_dict[key] = [ad_1_dict[key][0] + temp[key][0], ad_1_dict[key][1] + temp[key][1]]
+            
+            if(i == len(ad_1_segpath)-1):
+                for key in brain_regions.keys():
+                    ad_1_dict[key] = [ad_1_dict[key][0] / ad_1_dict[key][1], brain_regions[key]]
+        
+        # writing all aggregated shap values to CSV
+        write_to_csv(output_filepath+"/agg_ad_1.csv", header, ad_1_dict)
+
+        # sorting the list based on the average shap values
+        sorted_data = output_top_10_lst(output_filepath+"/agg_ad_1.csv")
+
+        # writing to output file
+        write_to_csv(output_filepath+"/task-4-true.csv", header, sorted_data)
