@@ -306,11 +306,11 @@ if __name__ == '__main__':
             data = test_mri_csv.readlines()
             for line in data:
                 if(line[-2] == "0"):
-                    ad_0_shap_values.append(input_filepath+"/"+os.path.split(line.split(",")[0])[1])
+                    ad_0_shap_values.append(output_filepath+"/SHAP/data"+"/"+os.path.split(line.split(",")[0])[1])
                     temp_segpath = os.path.split(line.split(",")[0])[1].strip(".npy") + ".nii"
                     ad_0_segpath.append(input_filepath+"/seg/"+temp_segpath)
                 if(line[-2] == "1"):
-                    ad_1_shap_values.append(input_filepath+"/"+os.path.split(line.split(",")[0])[1])
+                    ad_1_shap_values.append(output_filepath+"/SHAP/data"+"/"+os.path.split(line.split(",")[0])[1])
                     temp_segpath = os.path.split(line.split(",")[0])[1].strip(".npy") + ".nii"
                     ad_1_segpath.append(input_filepath+"/seg/"+temp_segpath)
 
@@ -320,7 +320,7 @@ if __name__ == '__main__':
         header = ("Region number", "region", "value")
 
         for i in range(len(ad_0_segpath)):
-            temp = aggregate_SHAP_values_per_region(np.load(ad_0_shap_values[i]), ad_0_segpath[i], brain_regions)
+            temp = aggregate_SHAP_values_per_region(np.load(ad_0_shap_values[i])[0], ad_0_segpath[i], brain_regions)
 
             if(len(ad_0_dict) == 0):
                 ad_0_dict = temp
@@ -341,7 +341,7 @@ if __name__ == '__main__':
         write_to_csv(output_filepath+"/task-4-false.csv", header, sorted_data)
 
         for i in range(len(ad_1_segpath)):
-            temp = aggregate_SHAP_values_per_region(np.load(ad_1_shap_values[i]), ad_1_segpath[i], brain_regions)
+            temp = aggregate_SHAP_values_per_region(np.load(ad_1_shap_values[i])[1], ad_1_segpath[i], brain_regions)
 
             if(len(ad_1_dict) == 0):
                 ad_1_dict = temp
