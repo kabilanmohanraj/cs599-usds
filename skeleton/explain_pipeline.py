@@ -200,40 +200,44 @@ if __name__ == '__main__':
             write_to_csv(output_filepath+"/task-1.csv", header, data)
 
 
-    # TASK II: Probe the CNN model to generate predictions and compute the SHAP 
-    #          values for each MRI using the DeepExplainer or the GradientExplainer. 
-    #          Save the generated SHAP values that correspond to instances with a
-    #          correct prediction into output/SHAP/data/
-    # YOUR CODE HERE
-    # create_SHAP_values(bg_loader, test_loader, 5, output_filepath)
+    if(args.task == "2"):
+        # TASK II: Probe the CNN model to generate predictions and compute the SHAP 
+        #          values for each MRI using the DeepExplainer or the GradientExplainer. 
+        #          Save the generated SHAP values that correspond to instances with a
+        #          correct prediction into output/SHAP/data/
+        # YOUR CODE HERE
+        create_SHAP_values(bg_loader, test_loader, 5, output_filepath)
 
-    # TASK III: Plot an explanation (pixel-based SHAP heatmaps) for a random MRI. 
-    #           Save heatmaps into output/SHAP/heatmaps/
+    if(args.task == "3"):
+        # TASK III: Plot an explanation (pixel-based SHAP heatmaps) for a random MRI. 
+        #           Save heatmaps into output/SHAP/heatmaps/
 
-    # Loading the numpy arrays
-    ad_1 = np.load("../output/SHAP/data/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
-    ad_1_image = np.load("../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
+        # Loading the numpy arrays
+        ad_1 = np.load("../output/SHAP/data/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
+        ad_1_image = np.load("../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
 
-    ad_0 = np.load("../output/SHAP/data/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
-    ad_0_image = np.load("../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
-    
-    # Plotting the heatmaps
-    plot_shap_on_mri(ad_1_image, ad_1, 1)
-    plot_shap_on_mri(ad_0_image, ad_0, 0)
+        ad_0 = np.load("../output/SHAP/data/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
+        ad_0_image = np.load("../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
+        
+        # Plotting the heatmaps
+        plot_shap_on_mri(ad_1_image, ad_1, 1)
+        plot_shap_on_mri(ad_0_image, ad_0, 0)
 
-    # TASK IV: Map each SHAP value to its brain region and aggregate SHAP values per region.
-    #          Report the top-10 most contributing regions per class (AD/NC) as top10_{class}.csv
-    #          Save CSV files into output/top10/
-    # YOUR CODE HERE
+    if(args.task == "4"):
+        # TASK IV: Map each SHAP value to its brain region and aggregate SHAP values per region.
+        #          Report the top-10 most contributing regions per class (AD/NC) as top10_{class}.csv
+        #          Save CSV files into output/top10/
+        # YOUR CODE HERE
 
-    ad_0_list = ["../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy",
-"../ADNI3/ADNI_099_S_6632_MR_Accelerated_Sag_IR-FSPGR___br_raw_20200207123735297_1_S920619_I1286418.npy",
-"../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy"]
+        ad_0_list = ["../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy",
+    "../ADNI3/ADNI_099_S_6632_MR_Accelerated_Sag_IR-FSPGR___br_raw_20200207123735297_1_S920619_I1286418.npy",
+    "../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy"]
 
-    ad_1_list = ["../ADNI3/ADNI_011_S_6303_MR_Accelerated_Sagittal_MPRAGE__br_raw_20190430142811025_189_S819896_I1160021.npy",
-"../ADNI3/ADNI_022_S_6013_MR_Sagittal_3D_Accelerated_MPRAGE_br_raw_20190314145101831_129_S806245_I1142379.npy"]
+        ad_1_list = ["../ADNI3/ADNI_011_S_6303_MR_Accelerated_Sagittal_MPRAGE__br_raw_20190430142811025_189_S819896_I1160021.npy",
+    "../ADNI3/ADNI_022_S_6013_MR_Sagittal_3D_Accelerated_MPRAGE_br_raw_20190314145101831_129_S806245_I1142379.npy"]
 
-    # for filename
-    aggregate_SHAP_values_per_region(ad_0_list, "../ADNI3/seg/ADNI_011_S_6303_MR_Accelerated_Sagittal_MPRAGE__br_raw_20190430142811025_189_S819896_I1160021.nii", brain_regions)
-
-    print(aggregate_SHAP_values_per_region(ad_0_list, "../ADNI3/seg/ADNI_011_S_6303_MR_Accelerated_Sagittal_MPRAGE__br_raw_20190430142811025_189_S819896_I1160021.nii", brain_regions))
+        for filename in ad_0_list:
+            aggregate_SHAP_values_per_region(ad_0_list, filename, brain_regions)
+        
+        for filename in ad_1_list:
+            aggregate_SHAP_values_per_region(ad_0_list, filename, brain_regions)
