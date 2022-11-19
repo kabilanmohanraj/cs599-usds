@@ -163,7 +163,7 @@ def plot_shap_on_mri(subject_mri, shap_values, label):
 
     # plot the feature attributions
 
-    ## (NOTE) One image for each 2D slice in the 3D MRI image
+    ## (NOTE) One image is generated for each 2D slice in the 3D MRI image
     shap.image_plot(np.rot90(shap_numpy[0][:, :, 91], k=1), np.rot90(test_numpy[:, :, 91]),show=False)
     plt.savefig(output_filepath+"/SHAP/heatmaps/"+str(label)+"-shap-slice-1.png")
     
