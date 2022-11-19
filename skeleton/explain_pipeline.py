@@ -12,11 +12,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+from PIL import Image
+
 from model import _CNN
 from data_util import split_csv
 from data_util import CNN_Data
 from data_util import brain_regions
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
 # This is a color map that you can use to plot the SHAP heatmap on the input MRI
 colors = []
@@ -61,7 +65,8 @@ def create_SHAP_values(bg_loader, test_loader, mri_count, save_path):
     for _, sample in enumerate(bg_loader):
         bg_images, filename, _ = sample
         all_bg_images += bg_images
-    print(np.shape(all_bg_images))
+    
+    # initialize the DeepExplainer model
     deep_explainer = shap.DeepExplainer(cnn_model, torch.unsqueeze(torch.squeeze(bg_images, 0), 1))
 
     iterator = iter(test_loader)
@@ -123,17 +128,57 @@ def plot_shap_on_mri(subject_mri, shap_values, label):
     shap_numpy = np.expand_dims(shap_numpy, -1)
     shap_numpy = shap_numpy[label]
 
-    print(np.shape(shap_numpy))
-    print(np.shape(test_numpy))
+    # def combine_shap_plots():
+    #     slice_1 = Image.open(output_filepath+"/SHAP/heatmaps/shap-slice-1.png")
+    #     slice_2 = plt.imread(output_filepath+"/SHAP/heatmaps/shap-slice-2.png")
+    #     slice_3 = plt.imread(output_filepath+"/SHAP/heatmaps/shap-slice-3.png")
+
+    #     slice_1.size
+    #     slice_2.size
+    #     slice_3.size
+
+    #     slice_1 = slice_1.resize((250, 90))
+    #     slice_2 = slice_2.resize((250, 90))
+    #     slice_3 = slice_3.resize((250, 90))
+
+    #     image_combined = Image.new("RGB", (600, 1500), "white")
+    #     image_combined.paste(slice_1, (0,0))
+    #     image_combined.paste(slice_2, (0,500))
+    #     image_combined.paste(slice_3, (0,1000))
+
+    #     plt.savefig(output_filepath+"/SHAP/heatmaps/shap-combined-"+str(label)+".png")
+
+
+    # print(np.shape(shap_numpy[0][:, :, 91]), np.shape(test_numpy[:, :, 91]))
+
+    # shap_value_slices = np.array([[shap_numpy[0, :, :, 91]], [shap_numpy[0, :, 109, :]], [shap_numpy[0, 91, :, :]]])
+    # test_numpy_slices = np.array([test_numpy[:, :, 91], test_numpy[:, 109, :], test_numpy[91, :, :]])
+    # print(np.shape(shap_value_slices))
+
+    # shap_image_pair = [shap_numpy[0][:, :, 91], test_numpy[:, :, 91]]
+    # shap_image_pair = np.array(shap_image_pair)
+    # shap_image_pair = np.expand_dims(shap_image_pair, -1)
+    # print(np.shape(shap_image_pair))
+    # shap.image_plot(shap_value_slices, test_numpy_slices, show=False)
 
     # plot the feature attributions
-    fig, axs = plt.subplots(2)
-    # shap.image_plot(np.rot90(shap_numpy[0][91, :, :], k=1), np.rot90(test_numpy[91, :, :]),show=False)
-    # shap.image_plot(np.rot90(shap_numpy[0][:, 109, :], k=1), np.rot90(test_numpy[:, 109, :]),show=False)
-    shap.image_plot(np.rot90(shap_numpy[0][:, :, 91], k=1), np.rot90(test_numpy[:, :, 91]),show=False)
-    # shap.image_plot([np.rot90(shap_numpy[0][91], k=1), np.rot90(shap_numpy[0][91], k=1)], [np.rot90(test_numpy[:][:][91]), np.rot90(test_numpy[:][:][91])],show=False)
-    plt.savefig("../output/SHAP/heatmaps/shap2.png")
 
+    ## (NOTE) One image for each 2D slice in the 3D MRI image
+    shap.image_plot(np.rot90(shap_numpy[0][:, :, 91], k=1), np.rot90(test_numpy[:, :, 91]),show=False)
+    plt.savefig(output_filepath+"/SHAP/heatmaps/"+str(label)+"-shap-slice-1.png")
+    
+
+    shap.image_plot(np.rot90(shap_numpy[0][:, 109, :], k=1), np.rot90(test_numpy[:, 109, :]),show=False)
+    plt.savefig(output_filepath+"/SHAP/heatmaps/"+str(label)+"-shap-slice-2.png")
+    
+
+    shap.image_plot(np.rot90(shap_numpy[0][91, :, :], k=1), np.rot90(test_numpy[91, :, :]),show=False)
+    plt.savefig(output_filepath+"/SHAP/heatmaps/"+str(label)+"-shap-slice-3.png")
+
+    # combine_shap_plots()
+
+
+# Utility method to write data to csv file
 def write_to_csv(filepath, header, data):
     with open(filepath, 'w') as output_file:
         output_writer = csv.writer(output_file, delimiter=",")
