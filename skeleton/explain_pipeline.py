@@ -110,7 +110,8 @@ def output_top_10_lst(csv_file):
         next(input_reader)
         for row in input_reader:
             data_to_sort.append(row)
-    sorted_list = sorted(data_to_sort, key=lambda item: item[2], reverse=True)
+            # print(float(row[2]))
+    sorted_list = sorted(data_to_sort, key=lambda item: float(item[2]), reverse=True)
     
     return sorted_list[:10]
 
@@ -357,6 +358,6 @@ if __name__ == '__main__':
 
         # sorting the list based on the average shap values
         sorted_data = output_top_10_lst(output_filepath+"/agg_ad_1.csv")
-
+        # print(sorted_data)
         # writing to output file
         write_to_csv(output_filepath+"/task-4-true.csv", header, sorted_data)
