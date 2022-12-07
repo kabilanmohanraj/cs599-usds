@@ -13,15 +13,16 @@ import re
 import rioxarray
 import xarray as xr
 import numpy as np
-from utils import get_parent_context
+from lib.trace_utils import get_parent_context
 from opentelemetry import trace
-from .aws_util import S3Manager
-from .models import Model
+from lib.aws_util import S3Manager
+from lib.models import Model
 import zlib
 import io
 import shutil
 import itertools
 from collections import defaultdict
+
 
 # TODO: Trace this class
 @ray.remote(num_cpus=1)

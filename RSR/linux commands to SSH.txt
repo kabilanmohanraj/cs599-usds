@@ -1,0 +1,5 @@
+ssh -i rsr-private-key ubuntu@199.94.60.229
+ssh -i rsr-private-key ubuntu@199.94.60.89
+
+docker cp ./RSR/src/application-jaeger.py cb4599ac4e9a:/home/ray/RSR/application-jaeger.py
+(base) ray@docker-desktop:~/RSR/src$ python application-jaeger.py --urls=1

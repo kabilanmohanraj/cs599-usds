@@ -1,9 +1,9 @@
 from typing import List, Dict
 import logging
-from .workers import LandCoverWorker
+from lib.workers import LandCoverWorker
 from collections import defaultdict
 import ray
-from .aws_util import S3Manager
+from lib.aws_util import S3Manager
 
 
 class BoundBox:

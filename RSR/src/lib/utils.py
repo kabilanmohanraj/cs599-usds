@@ -6,15 +6,18 @@ import logging
 import math
 from lib.convertor import Convertor
 import ray
-from .config import ClusterConfig, BoundBox, TimeWindow
-from .workers import LandCoverWorker
-from .models import Model
+import lib
+from lib.config import ClusterConfig, BoundBox, TimeWindow
+from lib.workers import LandCoverWorker
+from lib.models import Model
+from lib.trace_utils import get_parent_context
 import os
 import requests
 import multiprocessing
 import collections
-from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags, Link
 from opentelemetry import trace
+
+
 class Data(object):
     """
     A handle to the distributed input dataset
@@ -331,13 +334,3 @@ class GoogleArchive(Archive):
             futures.append(worker.get_total_uncompressed_size.remote())
         data = ray.get(futures)
         return sum(data)/math.pow(1024,3)
-
-
-def get_parent_context(trace_id, span_id):
-    parent_context = SpanContext(
-        trace_id=trace_id,
-        span_id=span_id,
-        is_remote=True,
-        trace_flags=TraceFlags(0x01)
-    )
-    return trace.set_span_in_context(NonRecordingSpan(parent_context))

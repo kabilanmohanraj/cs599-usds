@@ -10,7 +10,6 @@ from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags, Link
 
 
 def parse_dict_ctx():
@@ -69,7 +68,7 @@ if __name__ == '__main__':
         global_timers['applyModel'].append(clock.time())
         r_model = MockModel()
 
-        imageData.apply_model(r_model,ctx_dic=parse_dict_ctx)
+        imageData.apply_model(r_model,ctx_dic=parse_dict_ctx())
 
         global_timers['applyModel'].append(clock.time())
         global_timers['collectFiles'].append(clock.time())
