@@ -39,10 +39,10 @@ class Data(object):
     def apply_model(self, model: Model, ctx_dic=None):
         ctx = get_parent_context(ctx_dic['traceId'],ctx_dic['spanId'])
         tracer = trace.get_tracer(__name__)
-        with tracer.start_as_current_span("apply_model",context=ctx):
+        with tracer.start_as_current_span("apply_model_util",context=ctx):
             if len(self.model_results) == 0:  # Apply the model if not already
                 for w in self.workers:
-                    self.model_results.append(w.apply_model.remote(model))
+                    self.model_results.append(w.apply_model.remote(model,ctx_dic))
                 print(ray.get(self.model_results))
             pass
 

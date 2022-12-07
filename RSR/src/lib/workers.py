@@ -13,7 +13,8 @@ import re
 import rioxarray
 import xarray as xr
 import numpy as np
-
+from utils import get_parent_context
+from opentelemetry import trace
 from .aws_util import S3Manager
 from .models import Model
 import zlib
@@ -350,9 +351,13 @@ class LandCoverWorker(object):
             return None
 
     # TODO: Trace this function
-    def apply_model(self, model: Model) -> bool:
-        print("Hostname: {} top left: {}".format(self.hostname, self.top_left))
-        return model.apply_model(self.data, self.times, self.top_left)
+    def apply_model(self, model: Model,ctx_dic=None) -> bool:
+        ctx = get_parent_context(ctx_dic['traceId'],ctx_dic['spanId'])
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("apply_model_worker", context=ctx):
+            print("Hostname: {} top left: {}".format(self.hostname, self.top_left))
+
+            return model.apply_model(self.data, self.times, self.top_left)
 
     # # Store xarray partition on this worker
     # # Will be called by other workers when passing partitions to this worker
