@@ -10,6 +10,15 @@ from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags, Link
+
+
+def parse_dict_ctx():
+    # 4. Serialize current span context and pass it along with the message
+    context = trace.get_current_span().get_span_context()
+    return dict({'traceId': context.trace_id,
+                 'spanId': context.span_id})
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Sample application for running models")
@@ -32,27 +41,41 @@ if __name__ == '__main__':
     time_window = TimeWindow(1)
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("main-start"):
-        ray.init(address="auto", runtime_env =runtime_env)
+        ray.init(address="auto", runtime_env=runtime_env)
         global_timers = defaultdict(list)
         global_timers['e2e'].append(clock.time())
         global_timers['clusterCreation'].append(clock.time())
         c = ClusterConfig(len(ray.nodes()), ray.cluster_resources()['CPU'], int(ray.cluster_resources()['CPU']))
-        c.initialize_workers()
+
+        with tracer.start_as_current_span("initialize_workers"):
+            c.initialize_workers()
+
         global_timers['clusterCreation'].append(clock.time())
         global_timers['archiveDownload'].append(clock.time())
         archive = GoogleArchive(c)
-        archive.query(bound_box, time_window).fetch_urls(args.urlCount).download()
+
+        with tracer.start_as_current_span("fetch_urls"):
+            f = archive.query(bound_box, time_window).fetch_urls(args.urlCount)
+            with tracer.start_as_current_span("download"):
+                f.download()
+
         global_timers['archiveDownload'].append(clock.time())
         global_timers['redistribute'].append(clock.time())
-        imageData = archive.redistribute()
+
+        with tracer.start_as_current_span("redistribute"):
+            imageData = archive.redistribute()
+
         global_timers['redistribute'].append(clock.time())
         global_timers['applyModel'].append(clock.time())
         r_model = MockModel()
-        imageData.apply_model(r_model)
+
+        imageData.apply_model(r_model,ctx_dic=parse_dict_ctx)
+
         global_timers['applyModel'].append(clock.time())
         global_timers['collectFiles'].append(clock.time())
         imageData.collect_data()
         global_timers['collectFiles'].append(clock.time())
         global_timers['e2e'].append(clock.time())
+
         for key in global_timers.keys():
             print(f'{key}: {global_timers[key][1] - global_timers[key][0]}')

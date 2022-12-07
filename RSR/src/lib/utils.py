@@ -13,8 +13,8 @@ import os
 import requests
 import multiprocessing
 import collections
-
-
+from opentelemetry.trace import NonRecordingSpan, SpanContext, SpanKind, TraceFlags, Link
+from opentelemetry import trace
 class Data(object):
     """
     A handle to the distributed input dataset
@@ -36,12 +36,15 @@ class Data(object):
         pass
 
     # Applies Dan's model to the preprocessed time series
-    def apply_model(self, model: Model):
-        if len(self.model_results) == 0:  # Apply the model if not already
-            for w in self.workers:
-                self.model_results.append(w.apply_model.remote(model))
-            print(ray.get(self.model_results))
-        pass
+    def apply_model(self, model: Model, ctx_dic=None):
+        ctx = get_parent_context(ctx_dic['traceId'],ctx_dic['spanId'])
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("apply_model",context=ctx):
+            if len(self.model_results) == 0:  # Apply the model if not already
+                for w in self.workers:
+                    self.model_results.append(w.apply_model.remote(model))
+                print(ray.get(self.model_results))
+            pass
 
     def collect_data(self,convertor:Convertor=None):
         output_map_futures = []
@@ -330,3 +333,11 @@ class GoogleArchive(Archive):
         return sum(data)/math.pow(1024,3)
 
 
+def get_parent_context(trace_id, span_id):
+    parent_context = SpanContext(
+        trace_id=trace_id,
+        span_id=span_id,
+        is_remote=True,
+        trace_flags=TraceFlags(0x01)
+    )
+    return trace.set_span_in_context(NonRecordingSpan(parent_context))
