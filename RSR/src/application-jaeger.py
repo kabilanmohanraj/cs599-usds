@@ -10,13 +10,7 @@ from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-
-def parse_dict_ctx():
-    # 4. Serialize current span context and pass it along with the message
-    context = trace.get_current_span().get_span_context()
-    return dict({'traceId': context.trace_id,
-                 'spanId': context.span_id})
+from lib.trace_utils import parse_dict_ctx
 
 
 if __name__ == '__main__':
@@ -38,7 +32,10 @@ if __name__ == '__main__':
     runtime_env = {"working_dir": "."}
     bound_box = BoundBox(12, 31, 12, 31)
     time_window = TimeWindow(1)
+
     tracer = trace.get_tracer(__name__)
+
+
     with tracer.start_as_current_span("main-start"):
         ray.init(address="auto", runtime_env=runtime_env)
         global_timers = defaultdict(list)
@@ -51,7 +48,9 @@ if __name__ == '__main__':
 
         global_timers['clusterCreation'].append(clock.time())
         global_timers['archiveDownload'].append(clock.time())
-        archive = GoogleArchive(c)
+
+        with tracer.start_as_current_span("google_archive"):
+            archive = GoogleArchive(c)
 
         with tracer.start_as_current_span("fetch_urls"):
             f = archive.query(bound_box, time_window).fetch_urls(args.urlCount)
@@ -66,13 +65,17 @@ if __name__ == '__main__':
 
         global_timers['redistribute'].append(clock.time())
         global_timers['applyModel'].append(clock.time())
-        r_model = MockModel()
 
-        imageData.apply_model(r_model,ctx_dic=parse_dict_ctx())
+        with tracer.start_as_current_span("model_application"):
+            r_model = MockModel()
+            imageData.apply_model(r_model, ctx_dic=parse_dict_ctx())
 
         global_timers['applyModel'].append(clock.time())
         global_timers['collectFiles'].append(clock.time())
-        imageData.collect_data()
+
+        with tracer.start_as_current_span("collect_data"):
+            imageData.collect_data()
+
         global_timers['collectFiles'].append(clock.time())
         global_timers['e2e'].append(clock.time())
 

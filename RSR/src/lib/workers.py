@@ -13,7 +13,7 @@ import re
 import rioxarray
 import xarray as xr
 import numpy as np
-from lib.trace_utils import get_parent_context
+from lib.trace_utils import get_parent_context, parse_dict_ctx
 from opentelemetry import trace
 from lib.aws_util import S3Manager
 from lib.models import Model
@@ -22,6 +22,11 @@ import io
 import shutil
 import itertools
 from collections import defaultdict
+from opentelemetry import trace
+from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 
 # TODO: Trace this class
@@ -79,6 +84,21 @@ class LandCoverWorker(object):
         self.global_timers = defaultdict(list)
         self.downloaded_files = []
         self.total_uncompressed_size = 0
+
+        trace.set_tracer_provider(
+        TracerProvider(
+            resource=Resource.create({SERVICE_NAME: "RSR"})
+        )
+        )
+        jaeger_exporter = JaegerExporter(
+            agent_host_name="localhost",
+            agent_port=6831,
+        )
+        trace.get_tracer_provider().add_span_processor(
+            BatchSpanProcessor(jaeger_exporter)
+        )
+
+        self.tracer = trace.get_tracer(__name__)
 
     # Store the mapping from hostname to workers
     def set_assignments(self, assignments):
@@ -352,9 +372,10 @@ class LandCoverWorker(object):
             return None
 
     # TODO: Trace this function
-    def apply_model(self, model: Model,ctx_dic=None) -> bool:
+    def apply_model(self, model: Model, ctx_dic=None) -> bool:
         ctx = get_parent_context(ctx_dic['traceId'],ctx_dic['spanId'])
         tracer = trace.get_tracer(__name__)
+        
         with tracer.start_as_current_span("apply_model_worker", context=ctx):
             print("Hostname: {} top left: {}".format(self.hostname, self.top_left))
 

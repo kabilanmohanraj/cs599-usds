@@ -6,11 +6,10 @@ import logging
 import math
 from lib.convertor import Convertor
 import ray
-import lib
 from lib.config import ClusterConfig, BoundBox, TimeWindow
 from lib.workers import LandCoverWorker
 from lib.models import Model
-from lib.trace_utils import get_parent_context
+from lib.trace_utils import get_parent_context, parse_dict_ctx
 import os
 import requests
 import multiprocessing
@@ -45,7 +44,7 @@ class Data(object):
         with tracer.start_as_current_span("apply_model_util",context=ctx):
             if len(self.model_results) == 0:  # Apply the model if not already
                 for w in self.workers:
-                    self.model_results.append(w.apply_model.remote(model,ctx_dic))
+                    self.model_results.append(w.apply_model.remote(model, parse_dict_ctx()))
                 print(ray.get(self.model_results))
             pass
 
@@ -108,9 +107,9 @@ class GoogleArchive(Archive):
     # TODO: Trace this function
     def get_urls_for_tile(self, data):
         """
-            Fetch urls for downloading data
-            Parameters: path, row, bands
-            """
+        Fetch urls for downloading data
+        Parameters: path, row, bands
+        """
         ########################################################################################################
         # I changed this from the gw tutorial to match a cert available in SCC. May need to do the same on MOC
         ########################################################################################################

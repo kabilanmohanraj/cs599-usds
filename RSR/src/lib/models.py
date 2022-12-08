@@ -179,6 +179,8 @@ class RegressionModel(Model):
     # Applies Dan's model to the time series partition
     # NOTE (john): This method is called after calling 'apply_model()' on the
     def apply_model(self, data, times, top_left) -> bool:
+
+        
         grid_ts = data
         times = times
         top_left = top_left
