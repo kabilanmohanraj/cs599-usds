@@ -5,12 +5,15 @@ from scipy.linalg import solve_triangular
 import time as clock
 import random
 
+from opentelemetry import trace
+from lib.trace_utils import get_parent_context
+
 
 class Model:
     """
     Interface for ML model
     """
-    def apply_model(self, data, times, top_left) -> bool:
+    def apply_model(self, data, times, top_left, context_dict=None) -> bool:
         pass
 
 
@@ -179,8 +182,6 @@ class RegressionModel(Model):
     # Applies Dan's model to the time series partition
     # NOTE (john): This method is called after calling 'apply_model()' on the
     def apply_model(self, data, times, top_left) -> bool:
-
-        
         grid_ts = data
         times = times
         top_left = top_left
@@ -242,31 +243,35 @@ class MockModel(Model):
     """
 
     # TODO: Trace this function
-    def apply_model(self, data, times, top_left) -> bool:
-        grid_ts = data
-        times = times
-        top_left = top_left
-        # Convert time to days since 01/01/1970
-        start = date(1970, 1, 1)
+    def apply_model(self, data, times, top_left, context_dict=None) -> bool:
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict['traceId'],context_dict['spanId'])
 
-        def str_to_date(a):
-            return (datetime.strptime(a, '%Y%m%d').date())
+        with tracer.start_as_current_span("model_apply_model", context=ctx):
+            grid_ts = data
+            times = times
+            top_left = top_left
+            # Convert time to days since 01/01/1970
+            start = date(1970, 1, 1)
 
-        def date_to_days(a, start):
-            return (a - start).days
+            def str_to_date(a):
+                return (datetime.strptime(a, '%Y%m%d').date())
 
-        vstr_to_date = np.vectorize(str_to_date)
-        vdate_to_days = np.vectorize(date_to_days)
-        times = vstr_to_date(times)
-        times = vdate_to_days(times, start)
-        n = len(times)
-        results = np.empty([2, grid_ts.shape[1], grid_ts.shape[2]]).astype('float16')
-        for i in range(grid_ts.shape[1]):
-            print("Model application is %s percent complete" % (100 * float(i) / grid_ts.shape[1]))
-            for j in range(grid_ts.shape[2]):
-                y = grid_ts[:, i, j]
-                not_nans = (y != 0)
-                t = times[not_nans]
-                final_t = np.random.choice(t) if len(t) > 0 else 0
-                results[:, i, j] = [random.uniform(0,1), final_t]
-        return True
+            def date_to_days(a, start):
+                return (a - start).days
+
+            vstr_to_date = np.vectorize(str_to_date)
+            vdate_to_days = np.vectorize(date_to_days)
+            times = vstr_to_date(times)
+            times = vdate_to_days(times, start)
+            n = len(times)
+            results = np.empty([2, grid_ts.shape[1], grid_ts.shape[2]]).astype('float16')
+            for i in range(grid_ts.shape[1]):
+                print("Model application is %s percent complete" % (100 * float(i) / grid_ts.shape[1]))
+                for j in range(grid_ts.shape[2]):
+                    y = grid_ts[:, i, j]
+                    not_nans = (y != 0)
+                    t = times[not_nans]
+                    final_t = np.random.choice(t) if len(t) > 0 else 0
+                    results[:, i, j] = [random.uniform(0,1), final_t]
+            return True

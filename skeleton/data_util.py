@@ -30,7 +30,7 @@ class CNN_Data(Dataset):
             idx (int): The sample MRI index.
         '''
         mri_img_path = os.path.join(self.csv_dir.iloc[idx, 0])
-        mri_image = from_numpy(np.load(mri_img_path))
+        mri_image = from_numpy(np.load("../data/"+mri_img_path[2:]))
         label = self.csv_dir.iloc[idx, 1]
 
         return mri_image, mri_img_path, label
@@ -50,7 +50,7 @@ def split_csv(csv_file, output_folder='../ADNI3', random_seed = 1051):
         random_seed (int): The seed number to shuffle the csv_file (you can also define your own seed).
     '''
     mri_filepaths, mri_labels = read_csv(csv_file)
-    mri_filePaths_in_dir = os.listdir("../ADNI3/")
+    mri_filePaths_in_dir = os.listdir("../data/ADNI3/")
 
     mri_filepaths_to_keep = []
     mri_labels_to_keep = []
@@ -81,12 +81,12 @@ def split_csv(csv_file, output_folder='../ADNI3', random_seed = 1051):
     test_mri_paths, bg_mri_paths, test_mri_labels, bg_mri_labels = randomly_partition_lists()
 
     # generate CSV files using the test and bg lists
-    with open(output_folder+"/test_mri_data.csv", "w") as output_file:
+    with open("../data"+output_folder[2:]+"/test_mri_data.csv", "w") as output_file:
         csv_writer = csv.writer(output_file, delimiter=",")
         for i in range(len(test_mri_paths)):
             csv_writer.writerow([output_folder+"/"+test_mri_paths[i], test_mri_labels[i]])
     
-    with open(output_folder+"/bg_mri_data.csv", "w") as output_file:
+    with open("../data"+output_folder[2:]+"/bg_mri_data.csv", "w") as output_file:
         csv_writer = csv.writer(output_file, delimiter=",")
         for i in range(len(bg_mri_paths)):
             csv_writer.writerow([output_folder+"/"+bg_mri_paths[i], bg_mri_labels[i]])

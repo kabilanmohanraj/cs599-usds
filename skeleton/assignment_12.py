@@ -67,6 +67,7 @@ class ATuple:
     # Returns the input tuples with responsibility \rho >= 0.5 (if any)
     def responsible_inputs(self) -> List[Tuple]:
         temp_dict = GroupBy.how_provenance_dict
+        print(temp_dict)
         extracted_tuple_strings = []
         output_tuples = temp_dict.keys()
         for element in temp_dict.values():

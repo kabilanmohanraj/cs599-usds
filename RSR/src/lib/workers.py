@@ -91,14 +91,14 @@ class LandCoverWorker(object):
         )
         )
         jaeger_exporter = JaegerExporter(
-            agent_host_name="localhost",
+            agent_host_name="192.168.0.57",
             agent_port=6831,
         )
         trace.get_tracer_provider().add_span_processor(
             BatchSpanProcessor(jaeger_exporter)
         )
 
-        self.tracer = trace.get_tracer(__name__)
+        # self.tracer = trace.get_tracer(__name__)
 
     # Store the mapping from hostname to workers
     def set_assignments(self, assignments):
@@ -166,37 +166,41 @@ class LandCoverWorker(object):
     # TODO: Trace this function
     # Pulls data from a list of URLs (using wget)
     # Download to /home/ray/raw
-    def pull_data(self, urls):
-        """
-        Todo: Move this method to Archive class to get data and return handle to data
-        """
-        # Make sure folder exists
-        os.makedirs('/home/ray/raw', exist_ok=True)
-        os.chdir('/home/ray/raw')
-        # Scan for existing tifs
-        all_tifs = list(glob.glob('/home/ray/raw/*.TIF'))
+    def pull_data(self, urls, context_dict=None):
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+        tracer = trace.get_tracer(__name__)
+        
+        with tracer.start_as_current_span("pull_data", context=ctx):
+            """
+            Todo: Move this method to Archive class to get data and return handle to data
+            """
+            # Make sure folder exists
+            os.makedirs('/home/ray/raw', exist_ok=True)
+            os.chdir('/home/ray/raw')
+            # Scan for existing tifs
+            all_tifs = list(glob.glob('/home/ray/raw/*.TIF'))
 
-        def extract_filename(path: str):
-            path = Path(path)
-            return path.name
+            def extract_filename(path: str):
+                path = Path(path)
+                return path.name
 
-        filenames = set(map(extract_filename, all_tifs))
-        print(f'Downloading {len(urls)} TIFs')
-        for url in urls:
-            for attempt in range(10): #10 attempts of retry 
-                try:
-                    url_file_name = wget.filename_from_url(url)
-                    if url_file_name in filenames:
-                        # Don't download if it already exists
+            filenames = set(map(extract_filename, all_tifs))
+            print(f'Downloading {len(urls)} TIFs')
+            for url in urls:
+                for attempt in range(10): #10 attempts of retry 
+                    try:
+                        url_file_name = wget.filename_from_url(url)
+                        if url_file_name in filenames:
+                            # Don't download if it already exists
+                            continue
+                        else:
+                            wget.download(url)
+                        self.downloaded_files.append(url_file_name)
+                        break
+                    except Exception as e:
+                        print("Download {} failed: Exception {}".format(url,e))
                         continue
-                    else:
-                        wget.download(url)
-                    self.downloaded_files.append(url_file_name)
-                    break
-                except Exception as e:
-                    print("Download {} failed: Exception {}".format(url,e))
-                    continue
-        print("Final downloaded files for the worker {}-{}".format(self.node_id,self.id),self.downloaded_files)
+            print("Final downloaded files for the worker {}-{}".format(self.node_id,self.id),self.downloaded_files)
 
 
     # Deletes raw data downloaded with pull_data()
@@ -251,293 +255,344 @@ class LandCoverWorker(object):
         self.partitions = None
 
     # TODO: Trace this function
-    def redistribute(self, compression=False):
-        # Set directory of local TIFF files
-        self.global_timers["{}-{}-getFileNames".format(self.node_id,self.id)].append(clock.time())
-        os.chdir('/home/ray/raw/')
-        filenames_disk = sorted(glob.glob('/home/ray/raw/*.TIF'))
-        # print("{} Length of files: {} Start: {} end: {} --> ".format(self.hostname,len(filenames),startidx,startidx + urls_per_worker),filenames)
-        # filenames = filenames[startidx:startidx + urls_per_worker]
-        # print("Worker's share of URL ", self.hostname, "-->", filenames)
-        filenames = []
-        for file in self.downloaded_files:
-            filenames.append("/home/ray/raw/{}".format(file))
-        result = all(file in filenames_disk for file in filenames)
-        print("All files are avaiable in disk: {}".format(result))
-        self.global_timers["{}-{}-getFileNames".format(self.node_id,self.id)].append(clock.time())
+    def redistribute(self, compression=False, context_dict=None):
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+        tracer = trace.get_tracer(__name__)
 
-        # Import them lazily as a dask array
-        def index_from_filenames(filenames):
-            return [re.split("[_.]", f)[-2] for f in filenames]
+        with tracer.start_as_current_span("worker_redistribute", context=ctx):
+            # Set directory of local TIFF files
+            self.global_timers["{}-{}-getFileNames".format(self.node_id,self.id)].append(clock.time())
+            os.chdir('/home/ray/raw/')
+            filenames_disk = sorted(glob.glob('/home/ray/raw/*.TIF'))
+            # print("{} Length of files: {} Start: {} end: {} --> ".format(self.hostname,len(filenames),startidx,startidx + urls_per_worker),filenames)
+            # filenames = filenames[startidx:startidx + urls_per_worker]
+            # print("Worker's share of URL ", self.hostname, "-->", filenames)
+            filenames = []
+            for file in self.downloaded_files:
+                filenames.append("/home/ray/raw/{}".format(file))
+            result = all(file in filenames_disk for file in filenames)
+            print("All files are avaiable in disk: {}".format(result))
+            self.global_timers["{}-{}-getFileNames".format(self.node_id,self.id)].append(clock.time())
 
-        # TODO: Trace this function
-        def index_time_from_filenames(filenames):
-            return [re.split("[_.]", f)[3] for f in filenames]
+            # Import them lazily as a dask array
+            def index_from_filenames(filenames):
+                return [re.split("[_.]", f)[-2] for f in filenames]
 
-        # send data to specified worker
-        # TODO: Trace this function
-        def send_data_to_worker(data, times, top_left, worker,top_left_lat,top_left_long):
-            # print("Size of data before compression: ",data.nbytes)
-            if compression:
-                print("Size of data before compression: ",data.nbytes)
-                print("Dtype:                           ",data.dtype)
-                f = io.BytesIO()
-                np.save(f, data)
-                compressed_data = zlib.compress(f.getvalue(),level=-1)
-                print("Size of data after compression:  ",len(compressed_data))
-                return worker.store_partition.remote(compressed_data, times, top_left, top_left_lat, top_left_long ,True)
-            else:
-                return worker.store_partition.remote(data, times, top_left,top_left_lat, top_left_long)
+            # TODO: Trace this function
+            def index_time_from_filenames(filenames):
+                with tracer.start_as_current_span("index_time_from_filename"):
+                    return [re.split("[_.]", f)[3] for f in filenames]
 
-        # TODO: Trace this function
-        def chunk(chunks={'x': 5000, 'y': 5000}):
-            # TODO: Move this somewhere better
-            xmin = 247530
-            xmax = 445980
-            ymin = 4539000
-            ymax = 4718970
+            # send data to specified worker
+            # TODO: Trace this function
+            def send_data_to_worker(data, times, top_left, worker, top_left_lat, top_left_long):
+                with tracer.start_as_current_span("send_data_to_worker") as sdtw:
+                    context = sdtw.get_span_context()
+                    context_dict = {'traceId': context.trace_id,
+                                'spanId': context.span_id}
+                    # print("Size of data before compression: ",data.nbytes)
+                    if compression:
+                        print("Size of data before compression: ",data.nbytes)
+                        print("Dtype:                           ",data.dtype)
+                        f = io.BytesIO()
+                        np.save(f, data)
+                        compressed_data = zlib.compress(f.getvalue(),level=-1)
+                        print("Size of data after compression:  ",len(compressed_data))
+                        return worker.store_partition.remote(compressed_data, times, top_left, top_left_lat, top_left_long, True, context_dict)
+                    else:
+                        return worker.store_partition.remote(data, times, top_left, top_left_lat, top_left_long, context_dict=context_dict)
 
-            # Create time dimension from file name
-            times = index_time_from_filenames(filenames)  # This will hold the times to make the time dim
-            data_list = []
-            if len(filenames) == 0:
-                print('filenames in chunk() is empty')
-            self.global_timers["{}-{}-rioxarrayFile".format(self.node_id,self.id)].append(clock.time())
-            for file in filenames:
-                tif = rioxarray.open_rasterio(file,
-                                              chunks=chunks)  # Create Pointer to data on disk, and established the chunks
-                # Adjust the size of the data on disk to be over the tile in question
-                tif = tif.rio.pad_box(minx=xmin, maxx=xmax, miny=ymin, maxy=ymax,
-                                      constant_values=0)
-                tif = tif.rio.slice_xy(minx=xmin, maxx=xmax, miny=ymin, maxy=ymax)
 
-                data_list.append(tif)  # append Pointer to data list
-            self.global_timers["{}-{}-rioxarrayFile".format(self.node_id,self.id)].append(clock.time())
-            # Create one big pointer to data on disk by adding the time axis, which indicates when the picture was taken
-            self.global_timers["{}-{}-finalData".format(self.node_id,self.id)].append(clock.time())
-            time_dim = xr.Variable('time', times)
-            all_data = xr.concat(data_list, dim=time_dim).astype(
-                'uint16')  # make sure the max size is 16 bits to save space
-            print("{}-{}: Data size uncompressed: ".format(self.node_id,self.id),all_data.nbytes)
-            # get x and y from da
-            # then do node and worker partition
-            (y, x) = all_data.shape[2:4]
-            self.global_timers["{}-{}-finalData".format(self.node_id,self.id)].append(clock.time())
-            self.global_timers["{}-{}-partitionData".format(self.node_id,self.id)].append(clock.time())
-            # Partition nodes and worker
-            node_partition = self.partition_nodes(x)
-            worker_partition = self.partition_workers(y)
-            self.global_timers["{}-{}-partitionData".format(self.node_id,self.id)].append(clock.time())
-            return node_partition, worker_partition, all_data
+            # TODO: Trace this function
+            def chunk(chunks={'x': 5000, 'y': 5000}):
+                with tracer.start_as_current_span("create_chunks") as cc:
+                    context = cc.get_span_context()
+                    context_dict = {'traceId': context.trace_id,
+                                'spanId': context.span_id}
+                    # TODO: Move this somewhere better
+                    xmin = 247530
+                    xmax = 445980
+                    ymin = 4539000
+                    ymax = 4718970
 
-        # TODO: Trace this function
-        def reshuffle(node_partition, worker_partition, da):
-            res = []
-            times = da.time.values
-            # print("Total Data size uncompressed: ",da.nbytes)
-            # Get all the other host assigned  to this worker
-            self.global_timers["{}-{}-reshuffle".format(self.node_id,self.id)].append(clock.time())
-            for hostname in self.assignments:
-                # Get the node grid assigned for every host
-                node_grid = node_partition[hostname]
-                # print("Hostname: {} node grid: {}".format(hostname, node_grid))
-                for i in range(len(self.assignments[hostname])):
-                    # Loop through all the recieving worker and send them their respective partitions
-                    worker_grid = worker_partition[i]
-                    # print("Hostname: {} Worker: {} worker grid: {}".format(hostname, i, worker_grid))
-                    # Get the portion of data from the actual tiff file . Remember lazy loading until .values is called
-                    self.global_timers["{}-{}-unpackData".format(self.node_id,self.id)].append(clock.time())
-                    lat_coord = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].x[0].values
-                    long_coord = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].y[0].values
-                    data = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].values
-                    self.total_uncompressed_size = self.total_uncompressed_size + data.nbytes
-                    self.global_timers["{}-{}-unpackData".format(self.node_id,self.id)].append(clock.time())
-                    # print("Hostname: {} Worker: {} Data Shape: {}".format(hostname, i, data.shape))
-                    top_left = [worker_grid[0], node_grid[0]]
-                    # Send the portion of data retrieved from file
-                    self.global_timers["{}-{}-sendDataToWorkers".format(self.node_id,self.id)].append(clock.time())
-                    res.append(send_data_to_worker(data, times, top_left, self.assignments[hostname][i], lat_coord, long_coord))
-                    self.global_timers["{}-{}-sendDataToWorkers".format(self.node_id,self.id)].append(clock.time())
-            self.global_timers["{}-{}-reshuffle".format(self.node_id,self.id)].append(clock.time())
-            return res
-        try:
-            if len(filenames) > 0:
-                node_partition, worker_partition, da = chunk()
-                rslt = reshuffle(node_partition, worker_partition, da)
-                return rslt
-            else:
-                return []
-        except Exception as e:
-            logging.error("Error while redistributing for workerID: {}".format(self.id), exc_info=True)
-            return None
+                    # Create time dimension from file name
+                    times = index_time_from_filenames(filenames)  # This will hold the times to make the time dim
+                    data_list = []
+                    if len(filenames) == 0:
+                        print('filenames in chunk() is empty')
+                    self.global_timers["{}-{}-rioxarrayFile".format(self.node_id,self.id)].append(clock.time())
+                    for file in filenames:
+                        tif = rioxarray.open_rasterio(file,
+                                                    chunks=chunks)  # Create Pointer to data on disk, and established the chunks
+                        # Adjust the size of the data on disk to be over the tile in question
+                        tif = tif.rio.pad_box(minx=xmin, maxx=xmax, miny=ymin, maxy=ymax,
+                                            constant_values=0)
+                        tif = tif.rio.slice_xy(minx=xmin, maxx=xmax, miny=ymin, maxy=ymax)
+
+                        data_list.append(tif)  # append Pointer to data list
+                    self.global_timers["{}-{}-rioxarrayFile".format(self.node_id,self.id)].append(clock.time())
+                    # Create one big pointer to data on disk by adding the time axis, which indicates when the picture was taken
+                    self.global_timers["{}-{}-finalData".format(self.node_id,self.id)].append(clock.time())
+                    time_dim = xr.Variable('time', times)
+                    all_data = xr.concat(data_list, dim=time_dim).astype(
+                        'uint16')  # make sure the max size is 16 bits to save space
+                    print("{}-{}: Data size uncompressed: ".format(self.node_id,self.id),all_data.nbytes)
+                    # get x and y from da
+                    # then do node and worker partition
+                    (y, x) = all_data.shape[2:4]
+                    self.global_timers["{}-{}-finalData".format(self.node_id,self.id)].append(clock.time())
+                    self.global_timers["{}-{}-partitionData".format(self.node_id,self.id)].append(clock.time())
+                    # Partition nodes and worker
+                    node_partition = self.partition_nodes(x, context_dict)
+                    worker_partition = self.partition_workers(y, context_dict)
+                    self.global_timers["{}-{}-partitionData".format(self.node_id,self.id)].append(clock.time())
+                    return node_partition, worker_partition, all_data
+
+            # TODO: Trace this function
+            def reshuffle(node_partition, worker_partition, da):
+                with tracer.start_as_current_span("reshuffle"):
+                    res = []
+                    times = da.time.values
+                    # print("Total Data size uncompressed: ",da.nbytes)
+                    # Get all the other host assigned  to this worker
+                    self.global_timers["{}-{}-reshuffle".format(self.node_id,self.id)].append(clock.time())
+                    for hostname in self.assignments:
+                        # Get the node grid assigned for every host
+                        node_grid = node_partition[hostname]
+                        # print("Hostname: {} node grid: {}".format(hostname, node_grid))
+                        for i in range(len(self.assignments[hostname])):
+                            # Loop through all the recieving worker and send them their respective partitions
+                            worker_grid = worker_partition[i]
+                            # print("Hostname: {} Worker: {} worker grid: {}".format(hostname, i, worker_grid))
+                            # Get the portion of data from the actual tiff file . Remember lazy loading until .values is called
+                            self.global_timers["{}-{}-unpackData".format(self.node_id,self.id)].append(clock.time())
+                            lat_coord = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].x[0].values
+                            long_coord = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].y[0].values
+                            data = da[:, 0, worker_grid[0]:worker_grid[1], node_grid[0]:node_grid[1]].values
+                            self.total_uncompressed_size = self.total_uncompressed_size + data.nbytes
+                            self.global_timers["{}-{}-unpackData".format(self.node_id,self.id)].append(clock.time())
+                            # print("Hostname: {} Worker: {} Data Shape: {}".format(hostname, i, data.shape))
+                            top_left = [worker_grid[0], node_grid[0]]
+                            # Send the portion of data retrieved from file
+                            self.global_timers["{}-{}-sendDataToWorkers".format(self.node_id,self.id)].append(clock.time())
+                            res.append(send_data_to_worker(data, times, top_left, self.assignments[hostname][i], lat_coord, long_coord))
+                            self.global_timers["{}-{}-sendDataToWorkers".format(self.node_id,self.id)].append(clock.time())
+                    self.global_timers["{}-{}-reshuffle".format(self.node_id,self.id)].append(clock.time())
+                    return res
+            try:
+                if len(filenames) > 0:
+                    node_partition, worker_partition, da = chunk()
+                    rslt = reshuffle(node_partition, worker_partition, da)
+                    return rslt
+                else:
+                    return []
+            except Exception as e:
+                logging.error("Error while redistributing for workerID: {}".format(self.id), exc_info=True)
+                return None
 
     # TODO: Trace this function
     def apply_model(self, model: Model, ctx_dic=None) -> bool:
         ctx = get_parent_context(ctx_dic['traceId'],ctx_dic['spanId'])
         tracer = trace.get_tracer(__name__)
-        
-        with tracer.start_as_current_span("apply_model_worker", context=ctx):
+        with tracer.start_as_current_span("apply_model_worker", context=ctx) as am:
             print("Hostname: {} top left: {}".format(self.hostname, self.top_left))
+            x = am.get_span_context()
+            context_dict = {'traceId': x.trace_id,
+                 'spanId': x.span_id}
 
-            return model.apply_model(self.data, self.times, self.top_left)
+            return model.apply_model(self.data, self.times, self.top_left, context_dict=context_dict)
 
     # # Store xarray partition on this worker
     # # Will be called by other workers when passing partitions to this worker
     # # Concatenate new partition to stored data
     # TODO: Trace this function
-    def store_partition(self, partition, times, top_left, top_left_lat, top_left_long, compression=False):
-        if compression:
-            partition = io.BytesIO(zlib.decompress(partition))
-            partition = np.load(partition)
-            print(type(partition))
-        if self.data is None:
-            self.data = partition
-            self.times = times
-            self.top_left = top_left
-            self.top_left_lat = top_left_lat
-            self.top_left_long = top_left_long
-        else:
-            self.data = np.concatenate([self.data, partition])
-            self.times = np.concatenate([self.times, times])
-        self.partition_id += 1
-        # store data to file after receiving all partitions
-        if self.partition_id == self.total_nodes:  # Partition id 10 ->1
-            # span.set_tag("host",self.hostname)
-            if self.bucket is None:
-                filename = str(self.id) + '_data.npy'
-                os.chdir('/home/ray/raw/')
-                np.save(filename, self.data)
-                # print(self.hostname, self.id, "saved data")
+    def store_partition(self, partition, times, top_left, top_left_lat, top_left_long, compression=False, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+
+        with tracer.start_as_current_span("store_partition", context=ctx):
+            if compression:
+                partition = io.BytesIO(zlib.decompress(partition))
+                partition = np.load(partition)
+                print(type(partition))
+            if self.data is None:
+                self.data = partition
+                self.times = times
+                self.top_left = top_left
+                self.top_left_lat = top_left_lat
+                self.top_left_long = top_left_long
             else:
-                filename = '{}-{}-{}-{}-{}-{}-{}-{}-data.npy'.format(self.path,self.row,self.node_id, self.id,
-                                                               self.top_left[0], self.top_left[1],
-                                                               self.top_left_lat, self.top_left_long)
-                bytes_ = io.BytesIO()
-                np.save(bytes_, self.data, allow_pickle=True)
-                bytes_.seek(0)
-                self.aws_client.save_data(self.bucket, filename, bytes_)
-                # print(self.hostname, self.id, "saved data")
-                time_filename = '{}-{}-{}-{}-{}-{}-{}-{}-times.npy'.format(self.path,self.row, self.node_id, self.id,
-                                                                     self.top_left[0], self.top_left[1],
-                                                                     self.top_left_lat, self.top_left_long)
-                timebytes_ = io.BytesIO()
-                np.save(timebytes_, self.times, allow_pickle=True)
-                timebytes_.seek(0)
-                self.aws_client.save_data(self.bucket+"-times", time_filename, timebytes_)
-                # print(self.hostname, self.id, "saved time data")
-        return
+                self.data = np.concatenate([self.data, partition])
+                self.times = np.concatenate([self.times, times])
+            self.partition_id += 1
+            # store data to file after receiving all partitions
+            if self.partition_id == self.total_nodes:  # Partition id 10 ->1
+                # span.set_tag("host",self.hostname)
+                if self.bucket is None:
+                    filename = str(self.id) + '_data.npy'
+                    os.chdir('/home/ray/raw/')
+                    np.save(filename, self.data)
+                    # print(self.hostname, self.id, "saved data")
+                else:
+                    filename = '{}-{}-{}-{}-{}-{}-{}-{}-data.npy'.format(self.path,self.row,self.node_id, self.id,
+                                                                self.top_left[0], self.top_left[1],
+                                                                self.top_left_lat, self.top_left_long)
+                    bytes_ = io.BytesIO()
+                    np.save(bytes_, self.data, allow_pickle=True)
+                    bytes_.seek(0)
+                    self.aws_client.save_data(self.bucket, filename, bytes_)
+                    # print(self.hostname, self.id, "saved data")
+                    time_filename = '{}-{}-{}-{}-{}-{}-{}-{}-times.npy'.format(self.path,self.row, self.node_id, self.id,
+                                                                        self.top_left[0], self.top_left[1],
+                                                                        self.top_left_lat, self.top_left_long)
+                    timebytes_ = io.BytesIO()
+                    np.save(timebytes_, self.times, allow_pickle=True)
+                    timebytes_.seek(0)
+                    self.aws_client.save_data(self.bucket+"-times", time_filename, timebytes_)
+                    # print(self.hostname, self.id, "saved time data")
+            return
 
     # TODO: Trace this function
-    def store_partition_idx(self, partition_idx):
-        # This only needs to be called once for each of the 80 workers
-        # But this was a quick fix based on the current design of the code
-        # Under current design of the code, this will be called 8*80 times.
-        if self.partition_idx is None:
-            self.partition_idx = partition_idx
-        return
+    def store_partition_idx(self, partition_idx, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+
+        with tracer.start_as_current_span("store_partition_idx", context=ctx):
+            # This only needs to be called once for each of the 80 workers
+            # But this was a quick fix based on the current design of the code
+            # Under current design of the code, this will be called 8*80 times.
+            if self.partition_idx is None:
+                self.partition_idx = partition_idx
+            return
 
     # Partition the data to stripes for each node
     # TODO: Trace this function
-    def partition_nodes(self, x):
-        nodes = list(self.assignments.keys())
-        root = x // len(nodes)
-        decimal = float(x) / len(nodes) - root
-        remainder = int(decimal * len(nodes))
-        partition = {}
-        last = 0
+    def partition_nodes(self, x, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
 
-        for i in range(len(nodes)):
-            if i < len(nodes) - remainder:
-                partition[nodes[i]] = [last, last + root]
-                last += root
-            else:
-                partition[nodes[i]] = [last, last + (root + 1)]
-                last += (root + 1)
-        return partition
+        with tracer.start_as_current_span("partition_nodes", context=ctx):
+            nodes = list(self.assignments.keys())
+            root = x // len(nodes)
+            decimal = float(x) / len(nodes) - root
+            remainder = int(decimal * len(nodes))
+            partition = {}
+            last = 0
+
+            for i in range(len(nodes)):
+                if i < len(nodes) - remainder:
+                    partition[nodes[i]] = [last, last + root]
+                    last += root
+                else:
+                    partition[nodes[i]] = [last, last + (root + 1)]
+                    last += (root + 1)
+            return partition
 
     # Partition the stripes to grids for each worker
     # TODO: Trace this function
-    def partition_workers(self, y):
-        workers_per_node = len(list(self.assignments.values())[0])
-        root = y // workers_per_node
-        decimal = float(y) / workers_per_node - root
-        remainder = int(decimal * workers_per_node)
-        partition = []
-        last = 0
+    def partition_workers(self, y, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
 
-        for i in range(workers_per_node):
-            if i < workers_per_node - remainder:
-                partition.append([last, last + root])
-                last += root
-            else:
-                partition.append([last, last + root + 1])
-                last += (root + 1)
+        with tracer.start_as_current_span("partition_workers", context=ctx):
+            workers_per_node = len(list(self.assignments.values())[0])
+            root = y // workers_per_node
+            decimal = float(y) / workers_per_node - root
+            remainder = int(decimal * workers_per_node)
+            partition = []
+            last = 0
 
-        return partition
+            for i in range(workers_per_node):
+                if i < workers_per_node - remainder:
+                    partition.append([last, last + root])
+                    last += root
+                else:
+                    partition.append([last, last + root + 1])
+                    last += (root + 1)
 
-    # TODO: Trace this function
-    def read_stored_data(self):
-        os.chdir('/home/ray/raw/')
-        self.data = np.load(str(self.id) + '_data.npy')
-
-    # TODO: Trace this function
-    def get_output_files(self,convertor:Convertor = None):
-        files_names = list(glob.glob('/home/ray/raw/results_*.npy'))
-        output_map = {}
-        if convertor is not None:
-            convertor.set_top_left(self.top_left_lat, self.top_left_long)
-        for file in files_names:
-            if convertor is None:
-                output_map[os.path.basename(file)] = np.load(file)
-            else:
-                converted_data = convertor.convert(np.load(file), self.id)
-                for key in converted_data:
-                    if key in output_map:
-                        output_map[key].extend(converted_data[key])
-                    else:
-                        output_map[key] = converted_data[key]
-        print("All files have been obtained... sending the results... Keys: ", len(output_map.keys()))
-        return output_map
+            return partition
 
     # TODO: Trace this function
-    def populate_data(self, file_name, time_file_name):
-        if self.aws_client is not None:
-            file_name_data = file_name.split("-")
-            data_byte = io.BytesIO(self.aws_client.get_data(self.bucket, file_name))
-            data_byte.seek(0)
-            self.data = np.load(data_byte)
-            time_data_byte = io.BytesIO(self.aws_client.get_data(self.bucket+"-times", time_file_name))
-            time_data_byte.seek(0)
-            self.times = np.load(time_data_byte)
-            self.top_left = [file_name_data[2], file_name_data[3]]
-            self.top_left_lat = float(file_name_data[4])
-            self.top_left_long = float(file_name_data[5])
-        return True
+    def read_stored_data(self, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+
+        with tracer.start_as_current_span("read_stored_data", context=ctx):
+            os.chdir('/home/ray/raw/')
+            self.data = np.load(str(self.id) + '_data.npy')
 
     # TODO: Trace this function
-    def delete_raw_folder(self):
-        try:
-            shutil.rmtree("/home/ray/raw")
-        except:
-            print("Directory doesnt exists....")
-        os.makedirs('/home/ray/raw', exist_ok=True)
-        print("Raw folder recreated: {}".format(os.path.isdir('/home/ray/raw')))
-        return True
+    def get_output_files(self, convertor:Convertor = None, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+
+        with tracer.start_as_current_span("get_output_files", context=ctx):
+            files_names = list(glob.glob('/home/ray/raw/results_*.npy'))
+            output_map = {}
+            if convertor is not None:
+                convertor.set_top_left(self.top_left_lat, self.top_left_long)
+            for file in files_names:
+                if convertor is None:
+                    output_map[os.path.basename(file)] = np.load(file)
+                else:
+                    converted_data = convertor.convert(np.load(file), self.id)
+                    for key in converted_data:
+                        if key in output_map:
+                            output_map[key].extend(converted_data[key])
+                        else:
+                            output_map[key] = converted_data[key]
+            print("All files have been obtained... sending the results... Keys: ", len(output_map.keys()))
+            return output_map
 
     # TODO: Trace this function
-    def reset_worker(self):
-        self.data = None
-        # store times of observations
-        self.times = None
-        self.downloaded_files = []
-        self.global_timers = defaultdict(list)
-        # id of partition received
-        self.partition_id = 0
-        self.top_left = None
-        self.top_left_lat = None
-        self.top_left_long = None
-        # print("Worker variables reset")
-        return True
+    def populate_data(self, file_name, time_file_name, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
 
+        with tracer.start_as_current_span("populate_data", context=ctx):
+            if self.aws_client is not None:
+                file_name_data = file_name.split("-")
+                data_byte = io.BytesIO(self.aws_client.get_data(self.bucket, file_name))
+                data_byte.seek(0)
+                self.data = np.load(data_byte)
+                time_data_byte = io.BytesIO(self.aws_client.get_data(self.bucket+"-times", time_file_name))
+                time_data_byte.seek(0)
+                self.times = np.load(time_data_byte)
+                self.top_left = [file_name_data[2], file_name_data[3]]
+                self.top_left_lat = float(file_name_data[4])
+                self.top_left_long = float(file_name_data[5])
+            return True
 
+    # TODO: Trace this function
+    def delete_raw_folder(self, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
 
+        with tracer.start_as_current_span("delete_raw_folder", context=ctx):
+            try:
+                shutil.rmtree("/home/ray/raw")
+            except:
+                print("Directory doesnt exists....")
+            os.makedirs('/home/ray/raw', exist_ok=True)
+            print("Raw folder recreated: {}".format(os.path.isdir('/home/ray/raw')))
+            return True
+
+    # TODO: Trace this function
+    def reset_worker(self, context_dict=None):
+        tracer = trace.get_tracer(__name__)
+        ctx = get_parent_context(context_dict["traceId"], context_dict["spanId"])
+
+        with tracer.start_as_current_span("reset_worker", context=ctx):
+            self.data = None
+            # store times of observations
+            self.times = None
+            self.downloaded_files = []
+            self.global_timers = defaultdict(list)
+            # id of partition received
+            self.partition_id = 0
+            self.top_left = None
+            self.top_left_lat = None
+            self.top_left_long = None
+            # print("Worker variables reset")
+            return True

@@ -281,10 +281,10 @@ if __name__ == '__main__':
 
         # Loading the numpy arrays
         ad_1 = np.load("../output/SHAP/data/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
-        ad_1_image = np.load("../ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
-
+        ad_1_image = np.load("../data/ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy")
+        # data/ADNI3/ADNI_135_S_6510_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190823121302839_11_S863934_I1215774.npy
         ad_0 = np.load("../output/SHAP/data/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
-        ad_0_image = np.load("../ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
+        ad_0_image = np.load("../data/ADNI3/ADNI_135_S_6446_MR_Accelerated_Sag_IR-FSPGR___br_raw_20190711143406269_109_S840461_I1185903.npy")
         
         # Plotting the heatmaps
         plot_shap_on_mri(ad_1_image, ad_1, 1)
